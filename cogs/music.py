@@ -250,13 +250,6 @@ class Music(commands.Cog):
             else:
                 await self.list_choices(ctx, player, search)
 
-    @commands.command(name='delete')
-    async def delete(self, ctx, number=None):
-        if number:
-            await ctx.channel.purge(limit=int(number))
-        else:
-            await ctx.channel.purge()
-
     @commands.command(name='pause', aliases=['p'], brief="Met le morceau en cours en pause",
                       description="Met le morceau en cours en pause.")
     async def pause(self, ctx):
@@ -340,6 +333,7 @@ class Music(commands.Cog):
     @commands.command(name='np', aliases=['song', 'current', 'currentsong', 'playing'], brief="Affiche le morceau en cours",
                       description="Affiche le morceau en cours.")
     async def now_playing(self, ctx):
+        await ctx.message.delete()
         vc = ctx.voice_client
 
         if not vc or not vc.is_connected():
