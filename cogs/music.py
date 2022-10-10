@@ -241,6 +241,12 @@ class Music(commands.Cog):
             await ctx.message.delete()
         player = self.get_player(ctx)
 
+        if len(search) > 250:
+            embed = discord.Embed(description="I can't search for something that long. "
+                                              "Try again with a search of less than 250 characters.",
+                                  color=discord.Color.greyple())
+            return await ctx.send(embed=embed)
+
         async with ctx.typing():
             if validators.url(search):
                 source = await YTDLSource.create_source(ctx, search, bot=self.bot, download=False)
@@ -418,6 +424,7 @@ class Music(commands.Cog):
     @commands.command(name='delete_edi_messages', brief="Supprime les messages de Edi",
                       description="Supprime les messages de Edi dans le channel courant.")
     async def delete_bot_messages(self, ctx):
+        ctx.message.delete()
         await ctx.channel.purge(check=lambda m: m.author == self.bot.user)
 
     @play.before_invoke
