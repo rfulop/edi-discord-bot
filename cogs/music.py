@@ -82,7 +82,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
                                           f"{ctx.author.mention}", color=discord.Color.greyple())
 
         embed.set_author(icon_url=bot.user.display_avatar, name=f"Put at the end of the queue 📀")
-        embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.avatar.url)
+        embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
         if download:
@@ -197,7 +197,6 @@ class Music(commands.Cog):
             except discord.HTTPException:
                 pass
         elif isinstance(error, InvalidVoiceChannel):
-            print(error)
             embed = discord.Embed(description=error.__str__(),
                                   color=discord.Color.greyple())
             await ctx.send(embed=embed)
@@ -239,7 +238,6 @@ class Music(commands.Cog):
                       description="Lance ou recherche un morceau à partir d'une url ou d'un groupe de mots-clés.")
     async def play(self, ctx, *, search):
         if ctx.message:
-            print(ctx.message)
             await ctx.message.delete()
         player = self.get_player(ctx)
 
@@ -268,7 +266,7 @@ class Music(commands.Cog):
         embed = discord.Embed(description=f"[{vc.source.title}]({vc.source.web_url}) | `{duration}` | `Requested by:` "
                                           f"{vc.source.requester.mention}", color=discord.Color.greyple())
         embed.set_author(icon_url=self.bot.user.display_avatar, name=f"Paused ⏸")
-        embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.avatar.url)
+        embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
 
         await ctx.send(embed=embed)
 
@@ -290,7 +288,7 @@ class Music(commands.Cog):
         embed = discord.Embed(description=f"[{vc.source.title}]({vc.source.web_url}) | `{duration}` | `Requested by:` "
                                           f"{vc.source.requester.mention}", color=discord.Color.greyple())
         embed.set_author(icon_url=self.bot.user.display_avatar, name=f"Resuming ⏯")
-        embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.avatar.url)
+        embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
 
         await ctx.send(embed=embed)
 
@@ -322,11 +320,9 @@ class Music(commands.Cog):
                 f"`{(upcoming.index(_)) + 1}.` [{_['title']}]({_['webpage_url']}) | `{duration}` | `Requested by:` {_['requester'].mention}\n"
                 for _ in upcoming)
 
-        print(fmt)
-
         embed = discord.Embed(description=fmt, color=discord.Color.greyple())
         embed.set_author(icon_url=self.bot.user.display_avatar, name=f"Queue for {ctx.guild.name} 🎼")
-        embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.avatar.url)
+        embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
 
         await ctx.send(embed=embed)
 
@@ -374,7 +370,7 @@ class Music(commands.Cog):
         vc.stop()
         embed = discord.Embed(color=discord.Color.greyple())
         embed.set_author(icon_url=self.bot.user.display_avatar, name=f"Skipping ⏭")
-        embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.avatar.url)
+        embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
     @commands.command(name='join', aliases=['connect', 'j'], brief="Rejoint le channel vocal dans lequel se trouve l'utilisateur",
@@ -418,6 +414,11 @@ class Music(commands.Cog):
         await ctx.send('**Successfully disconnected** 👋')
 
         await self.cleanup(ctx.guild)
+
+    @commands.command(name='delete_edi_messages', brief="Supprime les messages de Edi",
+                      description="Supprime les messages de Edi dans le channel courant.")
+    async def delete_bot_messages(self, ctx):
+        await ctx.channel.purge(check=lambda m: m.author == self.bot.user)
 
     @play.before_invoke
     async def ensure_voice(self, ctx):
