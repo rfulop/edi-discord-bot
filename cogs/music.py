@@ -239,7 +239,6 @@ class Music(commands.Cog):
     async def play(self, ctx, *, search):
         if ctx.message:
             await ctx.message.delete()
-        player = self.get_player(ctx)
 
         if not len(search):
             embed = discord.Embed(description="I can't search for something that tiny. "
@@ -253,6 +252,7 @@ class Music(commands.Cog):
 
         async with ctx.typing():
             if validators.url(search):
+                player = self.get_player(ctx)
                 source = await YTDLSource.create_source(ctx, search, bot=self.bot, download=False)
                 await player.queue.put(source)
             else:
@@ -260,6 +260,7 @@ class Music(commands.Cog):
                     embed = discord.Embed(description="The search you request contains unauthorized characters."
                                                       " Try again with alphanumeric characters only.")
                     return await ctx.send(embed=embed)
+                player = self.get_player(ctx)
                 await self.list_choices(ctx, player, search)
 
     @commands.command(name='pause', aliases=['p'], brief="Met le morceau en cours en pause",
