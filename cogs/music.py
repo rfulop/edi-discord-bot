@@ -424,7 +424,7 @@ class Music(commands.Cog):
     @commands.command(name='delete_edi_messages', brief="Supprime les messages de Edi",
                       description="Supprime les messages de Edi dans le channel courant.")
     async def delete_bot_messages(self, ctx):
-        ctx.message.delete()
+        await ctx.message.delete()
         await ctx.channel.purge(check=lambda m: m.author == self.bot.user)
 
     @play.before_invoke
