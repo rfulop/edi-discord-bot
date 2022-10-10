@@ -206,7 +206,7 @@ class Music(commands.Cog):
             await ctx.send(embed=embed)
 
         else:
-            embed = discord.Embed(description=error.__str__())
+            embed = discord.Embed(description="Something unexpected happened. Please try again.")
             await ctx.send(embed=embed)
 
     def get_player(self, ctx):
@@ -241,6 +241,10 @@ class Music(commands.Cog):
             await ctx.message.delete()
         player = self.get_player(ctx)
 
+        if not len(search):
+            embed = discord.Embed(description="I can't search for something that tiny. "
+                                              "Try again with a search of at least one character.")
+            return await ctx.send(embed=embed)
         if len(search) > 250:
             embed = discord.Embed(description="I can't search for something that long. "
                                               "Try again with a search of less than 250 characters.",
@@ -252,6 +256,10 @@ class Music(commands.Cog):
                 source = await YTDLSource.create_source(ctx, search, bot=self.bot, download=False)
                 await player.queue.put(source)
             else:
+                if not search.isalnum():
+                    embed = discord.Embed(description="The search you request contains unauthorized characters."
+                                                      " Try again with alphanumeric characters only.")
+                    return await ctx.send(embed=embed)
                 await self.list_choices(ctx, player, search)
 
     @commands.command(name='pause', aliases=['p'], brief="Met le morceau en cours en pause",
