@@ -212,7 +212,7 @@ class Music(commands.Cog):
     async def list_choices(self, ctx, search):
         results = YoutubeSearch(search, max_results=5).to_dict()
 
-        fmt = '\n'.join([await self.get_found_source_string(song, i) for i, song in enumerate(results)])
+        fmt = '\n'.join([await self.get_found_source_string(song, i+1) for i, song in enumerate(results)])
 
         embed = discord.Embed(description=fmt, color=discord.Color.greyple())
         embed.set_author(icon_url=self.bot.user.display_avatar, name=f'Results for: "{search}" 🔍')
