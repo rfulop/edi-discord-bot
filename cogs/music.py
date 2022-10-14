@@ -176,6 +176,13 @@ class Music(commands.Cog):
             f'`Requested by:` {source.requester.mention}'
         ])
 
+    @staticmethod
+    async def get_found_source_string(song, pos):
+        return ' | '.join([
+            f'`{pos}.` [{song["title"]}](https://youtube.com{song["url_suffix"]})',
+            f'`{song["duration"]}`'
+        ])
+
     async def send_source_embed(self, ctx, source, embed_title):
         embed = discord.Embed(description=await self.get_source_string(source), color=discord.Color.greyple())
         embed.set_author(icon_url=self.bot.user.display_avatar, name=embed_title)
@@ -205,9 +212,7 @@ class Music(commands.Cog):
     async def list_choices(self, ctx, search):
         results = YoutubeSearch(search, max_results=5).to_dict()
 
-        emotes = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
-        fmt = "\n".join([f'{emote} - **{result.get("title")}** `{result.get("duration")}`'
-                         for emote, result in zip(emotes, results)])
+        fmt = '\n'.join([await self.get_found_source_string(song, i) for i, song in enumerate(results)])
 
         embed = discord.Embed(description=fmt, color=discord.Color.greyple())
         embed.set_author(icon_url=self.bot.user.display_avatar, name=f'Results for: "{search}" 🔍')
