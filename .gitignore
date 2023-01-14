@@ -124,3 +124,11 @@ TEST-**.xml
 
 # Mac OS .DS_Store, which is a file that stores custom attributes of its containing folder
 .DS_Store
+
+# Replit
+replit*
+.replit
+replit.nix
+.upm
+poetry.lock
+pyproject.toml

@@ -1,4 +1,5 @@
 import os
+import platform
 
 import locale
 import aiohttp
@@ -12,7 +13,14 @@ GUILD_ID = os.getenv('GUILD_ID')
 VOICE_CHANNEL_ID = os.getenv('VOICE_CHANNEL_ID')
 APP_ID = os.getenv('APP_ID')
 
-locale.setlocale(locale.LC_TIME, "fr_FR.utf8")
+
+if platform.platform().startswith('Linux-5'):
+  discord.opus.load_opus('lib/libopus.so.0.8.0')
+
+try:
+  locale.setlocale(locale.LC_TIME, "fr_FR.utf8")
+except locale.Error:
+  pass
 
 
 class MyBot(commands.Bot):

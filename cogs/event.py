@@ -20,8 +20,8 @@ class PickButton(Button):
         self.embed = embed
 
     async def create_event(self, role: Role, users: str, date: datetime) -> ScheduledEvent:
-        event_start = date.replace(hour=20, minute=0, second=0).astimezone(pytz.timezone('Europe/Paris'))
-        event_end = date.replace(hour=23, minute=59, second=0).astimezone(pytz.timezone('Europe/Paris'))
+        event_start = date.replace(hour=19, minute=0, second=0).astimezone(pytz.timezone('Europe/Paris'))
+        event_end = date.replace(hour=22, minute=59, second=0).astimezone(pytz.timezone('Europe/Paris'))
         img_path = os.path.join('.', 'img', 'tavern.png')
         with open(img_path, 'rb') as img:
             f = img.read()
@@ -110,7 +110,7 @@ class Event(commands.Cog):
     @app_commands.describe(delay="Determine le premier jour proposé dans le sondage. Par défault: 0 (soit aujourd'hui)")
     @app_commands.guild_only()
     async def pick(self, ctx, role: discord.Role, days: int = 7, delay: int = 0) -> None:
-        now = datetime.now().astimezone()
+        now = datetime.now().astimezone(pytz.timezone('Europe/Paris'))
         if delay:
             now += timedelta(days=delay)
         mentions = [member.mention for member in role.members if not member.bot]
