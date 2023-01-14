@@ -7,7 +7,7 @@ import validators
 import yt_dlp as youtube_dl
 from yt_dlp.utils import DownloadError
 from async_timeout import timeout
-from discord import Message
+from discord import Embed, app_commands
 from discord.ext import commands
 from discord.ext.commands.errors import CommandInvokeError
 from discord.ui import Button, View
@@ -17,12 +17,12 @@ from exceptions import VoiceConnectionError, InvalidVoiceChannel
 
 
 class YTDLChoiceButton(Button):
-    def __init__(self, label: int, cog, ctx, url_suffix: str, embed_msg: Message):
-        super().__init__(label=str(label), style=discord.ButtonStyle.primary)
+    def __init__(self, label: int, cog, ctx, url_suffix: str, embed: Embed):
+        super().__init__(label=str(label), style=discord.ButtonStyle.primary, custom_id=f'ytdl_choice_btn_{label}')
         self.ctx = ctx
         self.cog = cog
         self.url_suffix = url_suffix
-        self.embed_msg = embed_msg
+        self.embed = embed
 
     async def callback(self, interaction):
         url = f'https://www.youtube.com{self.url_suffix}'
@@ -31,7 +31,6 @@ class YTDLChoiceButton(Button):
         await source.create_source(url, bot=self.cog.bot)
         await self.cog.send_source_embed(self.ctx, source, "Put at the end of the queue 📀")
         await player.queue.put(source)
-        await self.embed_msg.delete()
         await interaction.message.delete()
 
 
@@ -143,6 +142,10 @@ class Music(commands.Cog):
         self.queue = {}
         self.players = {}
 
+    @commands.Cog.listener()
+    async def on_ready(self):
+        print('Music cog is ready')
+
     async def cleanup(self, guild, force=False):
         if guild.voice_client:
             await guild.voice_client.disconnect(force=force)
@@ -216,18 +219,21 @@ class Music(commands.Cog):
 
         embed = discord.Embed(description=fmt, color=discord.Color.greyple())
         embed.set_author(icon_url=self.bot.user.display_avatar, name=f'Results for: "{search}" 🔍')
-        embed_msg = await ctx.send(embed=embed)
 
         view = View()
         for i, result in enumerate(results):
-            btn = YTDLChoiceButton(int(i+1), self, ctx, result['url_suffix'], embed_msg)
+            btn = YTDLChoiceButton(int(i+1), self, ctx, result['url_suffix'], embed)
             view.add_item(btn)
-        await ctx.send(view=view)
 
-    @commands.command(name='play', aliases=['search', 'pl'], brief="Lance ou met en queue un morceau",
-                      description="Lance ou recherche un morceau à partir d'une url ou d'un groupe de mots-clés.")
-    async def play(self, ctx, *, search):
-        if ctx.message:
+        await ctx.send(embed=embed, view=view)
+
+    @commands.hybrid_command(name='play', with_app_command=True, aliases=['search', 'pl'],
+                             brief="Lance ou met en queue un morceau",
+                             description="Lance ou recherche un morceau à partir d'une url ou de mots-clés.")
+    @app_commands.describe(search='Une url youtube ou des mots-clés')
+    @app_commands.guild_only()
+    async def play(self, ctx, search):
+        if ctx.message and not ctx.interaction:
             await ctx.message.delete()
 
         if not len(search):
@@ -237,23 +243,24 @@ class Music(commands.Cog):
             return await self.send_error_embed(ctx, "I can't search for something that long. "
                                                     "Try again with a search of less than 250 characters.")
 
-        async with ctx.typing():
-            if validators.url(search):
-                player = self.get_player(ctx)
-                source = YTDLSource(ctx.author)
-                await source.create_source(search, bot=self.bot)
-                await self.send_source_embed(ctx, source, "Put at the end of the queue 📀")
-                await player.queue.put(source)
-            else:
-                if not all(c.isalnum() or c.isspace() for c in search):
-                    return await self.send_error_embed(ctx, "The search you request contains unauthorized characters."
-                                                            " Try again with alphanumeric characters only.")
-                await self.list_choices(ctx, search)
+        if validators.url(search):
+            player = self.get_player(ctx)
+            source = YTDLSource(ctx.author)
+            await source.create_source(search, bot=self.bot)
+            await self.send_source_embed(ctx, source, "Put at the end of the queue 📀")
+            await player.queue.put(source)
+        else:
+            if not all(c.isalnum() or c.isspace() for c in search):
+                return await self.send_error_embed(ctx, "The search you request contains unauthorized characters."
+                                                        " Try again with alphanumeric characters only.")
+            await self.list_choices(ctx, search)
 
-    @commands.command(name='pause', aliases=['p'], brief="Met le morceau en cours en pause",
-                      description="Met le morceau en cours en pause.")
+    @commands.hybrid_command(name='pause', with_app_command=True, aliases=['p'],
+                             brief="Met le morceau en cours en pause", description="Met le morceau en cours en pause.")
+    @app_commands.guild_only()
     async def pause(self, ctx):
-        await ctx.message.delete()
+        if not ctx.interaction:
+            await ctx.message.delete()
         vc = ctx.voice_client
 
         if not vc or not vc.is_playing():
@@ -265,10 +272,12 @@ class Music(commands.Cog):
         player = self.get_player(ctx)
         await self.send_source_embed(ctx, player.current, embed_title="Paused ⏸")
 
-    @commands.command(name='resume', aliases=['replay', 'r'], brief="Relance le morceau mis en pause",
-                      description="Relance le morceau mis en pause.")
+    @commands.hybrid_command(name='resume', with_app_command=True, aliases=['replay', 'r'],
+                             brief="Relance le morceau mis en pause", description="Relance le morceau mis en pause.")
+    @app_commands.guild_only()
     async def resume(self, ctx):
-        await ctx.message.delete()
+        if not ctx.interaction:
+            await ctx.message.delete()
         vc = await self.get_voice_client(ctx)
         if not vc or not vc.is_paused():
             return
@@ -277,11 +286,14 @@ class Music(commands.Cog):
         player = self.get_player(ctx)
         await self.send_source_embed(ctx, player.current, embed_title="Resuming ⏯")
 
-    @commands.command(name='queue', aliases=['q', 'playlist'], brief="Affiche les morceaux contenus dans la liste",
-                      description="Affiche les quinzes premiers morceaux contenu dans la liste triés par ordre de"
-                                  " succession.")
+    @commands.hybrid_command(name='queue', with_app_command=True, aliases=['q', 'playlist'],
+                             brief="Affiche les morceaux contenus dans la liste",
+                             description="Affiche les quinzes premiers morceaux contenu dans la liste triés par ordre "
+                                         "de succession.")
+    @app_commands.guild_only()
     async def queue_info(self, ctx):
-        await ctx.message.delete()
+        if not ctx.interaction:
+            await ctx.message.delete()
         vc = await self.get_voice_client(ctx)
         if not vc:
             return
@@ -313,10 +325,12 @@ class Music(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @commands.command(name='np', aliases=['song', 'current', 'playing'], brief="Affiche le morceau en cours",
-                      description="Affiche le morceau en cours.")
+    @commands.hybrid_command(name='np', with_app_command=True, aliases=['song', 'current', 'playing'],
+                             brief="Affiche le morceau en cours", description="Affiche le morceau en cours.")
+    @app_commands.guild_only()
     async def now_playing(self, ctx):
-        await ctx.message.delete()
+        if not ctx.interaction:
+            await ctx.message.delete()
         vc = await self.get_voice_client(ctx)
         if not vc:
             return
@@ -327,11 +341,14 @@ class Music(commands.Cog):
 
         await self.send_source_embed(ctx, player.current, embed_title="Now Playing 🎶")
 
-    @commands.command(name='skip', aliases=['next', 'pass', 's'], brief="Passer au prochain morceau",
-                      description="Passer au prochain morceau. Si aucun morceau n'est en queue: met fin au "
-                                  "morceau en cours.")
+    @commands.hybrid_command(name='skip', with_app_command=True, aliases=['next', 'pass', 's'],
+                             brief="Passer au prochain morceau",
+                             description="Passer au prochain morceau. Si aucun morceau n'est en queue: met fin au "
+                                         "morceau en cours.")
+    @app_commands.guild_only()
     async def skip(self, ctx):
-        await ctx.message.delete()
+        if not ctx.interaction:
+            await ctx.message.delete()
         vc = await self.get_voice_client(ctx)
         if not vc:
             return
@@ -345,11 +362,14 @@ class Music(commands.Cog):
         await self.send_source_embed(ctx, skipped, embed_title="Skipping ⏭")
         vc.stop()
 
-    @commands.command(name='join', aliases=['connect', 'j'], brief="Rejoint le channel vocal dans lequel se trouve"
-                                                                   " l'utilisateur",
-                      description="Rejoint le channel vocal dans lequel se trouve l'utilisateur.")
-    async def connect(self, ctx, *, channel: discord.VoiceChannel = None, auto_connect=False):
-        if not auto_connect:
+    @commands.hybrid_command(name='join', with_app_command=True, aliases=['connect', 'j'],
+                             brief="Rejoint le channel vocal dans lequel se trouve l'utilisateur",
+                             description="Rejoint le channel vocal dans lequel se trouve l'utilisateur.")
+    @app_commands.describe(channel="Le channel a rejoindre. Si non spécifié le bot rejoint le channel dans lequel "
+                                  "l'utilisateur se trouve")
+    @app_commands.guild_only()
+    async def connect(self, ctx, channel: discord.VoiceChannel = None):
+        if ctx.command.name != 'join' and not ctx.interaction:
             await ctx.message.delete()
         if not channel:
             try:
@@ -373,11 +393,13 @@ class Music(commands.Cog):
 
         await ctx.send(f'**Joined `{channel}`** 🤟')
 
-    @commands.command(name='leave', aliases=['stop', 'dc', 'bye', 'quit'], brief="Arrête la musique et quitte "
-                                                                                 "le channel vocal",
-                      description="Arrête la musique et quitte le channel vocal. La queue est remise à zéro.")
+    @commands.hybrid_command(name='leave', with_app_command=True, aliases=['stop', 'dc', 'bye', 'quit'],
+                             brief="Arrête la musique et quitte le channel vocal",
+                             description="Arrête la musique et quitte le channel vocal. La queue est remise à zéro.")
+    @app_commands.guild_only()
     async def leave(self, ctx):
-        await ctx.message.delete()
+        if not ctx.interaction:
+            await ctx.message.delete()
         vc = await self.get_voice_client(ctx)
         if not vc:
             return
@@ -385,16 +407,10 @@ class Music(commands.Cog):
 
         await self.cleanup(ctx.guild)
 
-    @commands.command(name='delete_edi_messages', brief="Supprime les messages de Edi",
-                      description="Supprime les messages de Edi dans le channel courant.")
-    async def delete_bot_messages(self, ctx):
-        await ctx.message.delete()
-        await ctx.channel.purge(check=lambda m: m.author == self.bot.user)
-
     @play.before_invoke
     async def ensure_voice(self, ctx):
         if ctx.voice_client is None or not ctx.voice_client.is_connected():
-            await self.connect(ctx, auto_connect=True)
+            await self.connect(ctx)
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):

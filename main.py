@@ -1,5 +1,6 @@
 import os
 
+import locale
 import aiohttp
 import discord
 from discord.ext import commands, tasks
@@ -7,6 +8,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+GUILD_ID = os.getenv('GUILD_ID')
+VOICE_CHANNEL_ID = os.getenv('VOICE_CHANNEL_ID')
+APP_ID = os.getenv('APP_ID')
+
+locale.setlocale(locale.LC_TIME, "fr_FR.utf8")
 
 
 class MyBot(commands.Bot):
@@ -14,7 +20,9 @@ class MyBot(commands.Bot):
         super().__init__(command_prefix, intents=intents, **options)
         self.session = None
         self.initial_extensions = [
-            'cogs.music'
+            'cogs.music',
+            'cogs.event',
+            'cogs.utils',
         ]
 
     async def setup_hook(self):
@@ -22,6 +30,8 @@ class MyBot(commands.Bot):
         self.session = aiohttp.ClientSession()
         for ext in self.initial_extensions:
             await self.load_extension(ext)
+        cmds = await bot.tree.sync(guild=discord.Object(id=int(GUILD_ID)))
+        print(f'Synced {cmds} slash commands for guild: {GUILD_ID}.')
 
     async def close(self):
         await super().close()
@@ -37,5 +47,5 @@ class MyBot(commands.Bot):
 
 
 if __name__ == '__main__':
-    bot = MyBot('!', intents=discord.Intents().all())
+    bot = MyBot('!', intents=discord.Intents().all(), application_id=APP_ID)
     bot.run(DISCORD_TOKEN)
