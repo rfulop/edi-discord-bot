@@ -15,12 +15,12 @@ APP_ID = os.getenv('APP_ID')
 
 
 if platform.platform().startswith('Linux-5'):
-  discord.opus.load_opus('lib/libopus.so.0.8.0')
+    discord.opus.load_opus('lib/libopus.so.0.8.0')
 
 try:
-  locale.setlocale(locale.LC_TIME, "fr_FR.utf8")
+    locale.setlocale(locale.LC_TIME, "fr_FR.utf8")
 except locale.Error:
-  pass
+    pass
 
 
 class MyBot(commands.Bot):
