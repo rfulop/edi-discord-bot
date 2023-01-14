@@ -38,8 +38,8 @@ class PickButton(Button):
         return event
 
     async def send_message(self, event_url: str, role: Role, users: str):
-        await self.ctx.send(f'{users}, vous avez trouvé une date commune pour la prochaine session de {role.mention}'
-                            f' 🥳 !\nUn evenement a été créé ⬇️.')
+        await self.ctx.send(f"{users}, vous avez trouvé une date commune pour la prochaine session de {role.mention}"
+                            f" 🥳 !\nUn evenement a été créé ⬇️.\n(MJ, tu peux modifier l'heure.)")
         await self.ctx.send(event_url)
 
     async def callback(self, interaction):
