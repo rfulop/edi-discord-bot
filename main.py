@@ -42,8 +42,6 @@ class MyBot(commands.Bot):
         self.session = aiohttp.ClientSession()
         for ext in self.initial_extensions:
             await self.load_extension(ext)
-        cmds = await bot.tree.sync(guild=discord.Object(id=int(GUILD_ID)))
-        print(f'Synced {cmds} slash commands for guild: {GUILD_ID}.')
 
     async def close(self):
         await super().close()
