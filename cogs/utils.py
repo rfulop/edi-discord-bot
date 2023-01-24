@@ -1,8 +1,5 @@
-import discord
 from discord.ext import commands
 from discord import app_commands
-
-from main import GUILD_ID
 
 
 class Utils(commands.Cog):
@@ -33,9 +30,14 @@ class Utils(commands.Cog):
     async def delete_bot_messages(self, ctx):
         if not ctx.interaction:
             await ctx.message.delete()
-        await ctx.channel.purge(check=lambda m: m.author == self.bot.user)
+        count = 0
+        async for message in ctx.channel.history(limit=1000):
+            if message.author == self.bot.user:
+                count += 1
+                await message.delete()
+        await ctx.send(f'{count} messages deleted.')
 
 
 async def setup(bot):
-    await bot.add_cog(Utils(bot), guilds=[discord.Object(id=GUILD_ID)])
+    await bot.add_cog(Utils(bot))
 
