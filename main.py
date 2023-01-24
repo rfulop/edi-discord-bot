@@ -1,13 +1,9 @@
 import os
-from os import path
-
-import locale
 import aiohttp
-import discord
-from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
-from keep_alive import keep_alive
+import discord
+from discord.ext import commands, tasks
 
 
 load_dotenv()
@@ -15,16 +11,6 @@ DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = os.getenv('GUILD_ID')
 VOICE_CHANNEL_ID = os.getenv('VOICE_CHANNEL_ID')
 APP_ID = os.getenv('APP_ID')
-
-
-if path.exists(".replit"):
-    discord.opus.load_opus('lib/libopus.so.0.8.0')
-    keep_alive()
-
-try:
-    locale.setlocale(locale.LC_TIME, "fr_FR.utf8")
-except locale.Error:
-    pass
 
 
 class MyBot(commands.Bot):
@@ -59,13 +45,5 @@ class MyBot(commands.Bot):
 if __name__ == '__main__':
       
     bot = MyBot('!', intents=discord.Intents().all(), application_id=APP_ID)
-    if path.exists(".replit"):
-        try:
-            bot.run(DISCORD_TOKEN)
-        except discord.errors.HTTPException:
-            print("\n\n\nBLOCKED BY RATE LIMITS\nRESTARTING NOW\n\n\n")
-            os.system('kill 1')
-            os.system("python restarter.py")
-    else:
-        bot.run(DISCORD_TOKEN)
+    bot.run(DISCORD_TOKEN)
         
