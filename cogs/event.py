@@ -5,90 +5,15 @@ from datetime import datetime, timedelta
 
 import discord
 from discord.ext import commands, tasks
-from discord import app_commands, EntityType, Role, ScheduledEvent, MessageType
-from discord.ui import Button, View
+from discord import app_commands, EntityType, Role, ScheduledEvent, MessageType, Guild, TextChannel
 
 from main import GUILD_ID, VOICE_CHANNEL_ID, APP_ID
 
 
-class PickButton(Button):
-    def __init__(self, label: int, bot, ctx, embed: discord.Embed):
-        super().__init__(label=str(label), style=discord.ButtonStyle.primary, custom_id=f'pick_btn_{label}')
-        self.label = label
-        self.bot = bot
-        self.ctx = ctx
-        self.embed = embed
-
-    async def create_event(self, role: Role, users: str, date: datetime) -> ScheduledEvent:
-        event_start = date.replace(hour=19, minute=0, second=0).astimezone(pytz.timezone('Europe/Paris'))
-        event_end = date.replace(hour=22, minute=59, second=0).astimezone(pytz.timezone('Europe/Paris'))
-        img_path = os.path.join('.', 'img', 'tavern.png')
-        with open(img_path, 'rb') as img:
-            f = img.read()
-            img_bytes = bytearray(f)
-        event = await self.ctx.guild.create_scheduled_event(
-            name=f"Session {role}",
-            description=f"{users}, vous êtes coviés à la prochaine session de {role.mention}.",
-            start_time=event_start,
-            end_time=event_end,
-            entity_type=EntityType.voice,
-            channel=self.bot.get_channel(int(VOICE_CHANNEL_ID)),
-            image=img_bytes,
-        )
-        return event
-
-    async def send_message(self, event_url: str, role: Role, users: str):
-        await self.ctx.send(f"{users}, vous avez trouvé une date commune pour la prochaine session de {role.mention}"
-                            f" 🥳 !\nUn evenement a été créé ⬇️.\n(MJ, tu peux modifier l'heure.)")
-        await self.ctx.send(event_url)
-
-    async def callback(self, interaction):
-        embed_dict = self.embed.to_dict()
-        date_found = None
-        for field in embed_dict['fields']:
-            if field['name'].startswith(self.label):
-                msg = field['value'].split('\n')
-                users = ''
-                votes = msg[0]
-                if len(msg) > 1:
-                    users = msg[1]
-
-                v = votes.split('Votes: ')[1]
-                count, total = map(int, v.split('/'))
-                user = interaction.user.mention
-                if user not in users:
-                    count += 1
-                else:
-                    count -= 1
-                field['value'] = f'Votes: {count}/{total}'
-
-                if not users:
-                    field['value'] += f'\n{user}'
-                elif user not in users:
-                    field['value'] += f'\n{users} {user}'
-                else:
-                    field['value'] += f'\n{users.replace(user, "")}'
-
-                if count == total:
-                    date_found = field['name']
-
-        if date_found:
-            date = datetime.strptime(date_found.split('- ')[1], '%A %d %B %Y')
-            match = re.search(r'session de (.*?)\s*\?', self.embed.title)
-            role = match.group(1)
-            role = discord.utils.get(self.ctx.guild.roles, name=role)
-            mentions = [member.mention for member in role.members if not member.bot]
-            mentions_str = ', '.join(mentions)
-            event = await self.create_event(role, mentions_str, date)
-            await self.send_message(event.url, role, mentions_str)
-            await interaction.message.delete()
-
-        else:
-            await interaction.message.edit(embed=self.embed)
-            await interaction.response.defer()
-
-
 class Event(commands.Cog):
+
+    NB_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣']
+
     def __init__(self, bot):
         self.bot = bot
 
@@ -132,14 +57,14 @@ class Event(commands.Cog):
         if not alert_send and diff > 24:
             await self.send_reminders(poll, not_voters)
 
-    @tasks.loop(minutes=30)
+    @tasks.loop(minutes=60)
     async def find_polls(self):
         print('Starting find_polls task...')
         guild = self.bot.get_guild(int(GUILD_ID))
         for channel in guild.text_channels:
-            async for msg in channel.history(limit=10):
+            async for msg in channel.history(limit=1000):
                 if msg.author.bot and msg.author.id == int(APP_ID):
-                    if msg.embeds and msg.type == MessageType.chat_input_command and msg.embeds[0].title:
+                    if msg.embeds and msg.embeds[0].title:
                         embed = msg.embeds[0]
                         match = re.search(r'session de (.*?)\s*\?', embed.title)
                         if not match:
@@ -155,6 +80,89 @@ class Event(commands.Cog):
     async def on_ready(self):
         print('Event cog is ready')
         await self.find_polls.start()
+
+    async def create_event(self, guild: Guild, role: Role, users: str, date: datetime) -> ScheduledEvent:
+        event_start = date.replace(hour=20, minute=0, second=0).astimezone(pytz.timezone('Europe/Paris'))
+        event_end = date.replace(hour=23, minute=59, second=0).astimezone(pytz.timezone('Europe/Paris'))
+        img_path = os.path.join('.', 'img', 'tavern.png')
+        with open(img_path, 'rb') as img:
+            f = img.read()
+            img_bytes = bytearray(f)
+        event = await guild.create_scheduled_event(
+            name=f"Session {role}",
+            description=f"{users}, vous êtes coviés à la prochaine session de {role.mention}.",
+            start_time=event_start,
+            end_time=event_end,
+            entity_type=EntityType.voice,
+            channel=self.bot.get_channel(int(VOICE_CHANNEL_ID)),
+            image=img_bytes,
+        )
+        return event
+
+    @staticmethod
+    async def send_message(channel: TextChannel, event_url: str, role: Role, users: str):
+        await channel.send(f"{users}, vous avez trouvé une date commune pour la prochaine session de {role.mention} "
+                           f"🥳 !\nUn evenement a été créé ⬇️.\n(MJ, tu peux modifier l'heure.)")
+        await channel.send(event_url)
+
+    @staticmethod
+    async def check_embed_message(message):
+        if message.embeds:
+            embed = message.embeds[0]
+            if message.author.bot and embed.title.startswith('Quelles dispos pour la prochaine session de'):
+                return True
+        return False
+
+    async def reaction_callback(self, payload):
+        user = self.bot.get_user(payload.user_id)
+        if user != self.bot.user and payload.emoji.name in self.NB_EMOJIS:
+            channel = self.bot.get_channel(payload.channel_id)
+            message = await channel.fetch_message(payload.message_id)
+
+            if not await self.check_embed_message(message):
+                return
+            embed = message.embeds[0]
+            date_found = None
+            field = next((f for f in embed.fields if f.name.startswith(str(payload.emoji))), None)
+            if field:
+                msg = field.value.split('\n')
+                votes = msg[0]
+                users = msg[1] if len(msg) > 1 else ""
+                count, total = map(int, votes.split('Votes: ')[1].split('/'))
+                user = user.mention
+                if user in users:
+                    count -= 1
+                    users = users.replace(user, "")
+                else:
+                    count += 1
+                    users += f' {user}'
+                embed.set_field_at(index=self.NB_EMOJIS.index(str(payload.emoji)),
+                                   name=field.name, value=f'Votes: {count}/{total}\n{users}')
+                if count == total:
+                    date_found = field.name
+
+            if date_found:
+                date = datetime.strptime(date_found.split('- ')[1], '%A %d %B %Y')
+                match = re.search(r'session de (.*?)\s*\?', embed.title)
+                role = match.group(1)
+                guild = self.bot.get_guild(payload.guild_id)
+                role = discord.utils.get(guild.roles, name=role)
+                mentions = [member.mention for member in role.members if not member.bot]
+                mentions_str = ', '.join(mentions)
+                event = await self.create_event(guild, role, mentions_str, date)
+                await self.send_message(channel, event.url, role, mentions_str)
+                await message.delete()
+
+            else:
+                await message.edit(embed=embed)
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload):
+        await self.reaction_callback(payload)
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload):
+        await self.reaction_callback(payload)
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
@@ -177,25 +185,13 @@ class Event(commands.Cog):
         embed = discord.Embed(title=f'Quelles dispos pour la prochaine session de {role} ? 🎲',
                               color=discord.Color.greyple(), description=f'')
         embed.set_author(icon_url=self.bot.user.display_avatar, name=f'{ctx.author.display_name}')
-        for _ in range(3):
-            embed.add_field(name='', value='', inline=True)
-        spaces = '\u1CBC\u1CBC\u1CBC\u1CBC\u1CBC\u1CBC\u1CBC\u1CBC\u1CBC\u1CBC\u1CBC\u1CBC\u1CBC'
         for i in range(days):
-            date_name = f'{i+ 1} - ' + (now + timedelta(days=i)).strftime("%A %d %B %Y").title()
+            date_name = f'{self.NB_EMOJIS[i]} - ' + (now + timedelta(days=i)).strftime("%A %d %B %Y").title()
             embed.add_field(name=date_name, value=f'Votes: 0/{len(mentions)}', inline=True)
-            if not i % 2:
-                embed.add_field(name=spaces, value=spaces, inline=True)
-            else:
-                embed.add_field(name='\n\n', value='\n\n', inline=False)
-                embed.add_field(name='\n\n', value='\n\n', inline=False)
 
-        view = View()
-        for i in range(days):
-            btn = PickButton(label=i+1, bot=self.bot, ctx=ctx, embed=embed)
-            view.add_item(btn)
-
-        await ctx.send(f'{mentions_str}, vous etes coviés à la table {role.mention} !',
-                       embed=embed, view=view)
+        message = await ctx.send(f'{mentions_str}, vous etes coviés à la table {role.mention} !', embed=embed)
+        for emoji in self.NB_EMOJIS[:days]:
+            await message.add_reaction(emoji)
 
 
 async def setup(bot):
