@@ -1,4 +1,6 @@
 import os
+import queue
+import asyncio
 import re
 import pytz
 from datetime import datetime, timedelta
@@ -16,6 +18,8 @@ class Event(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self.queue = queue.Queue()
+        self.loop = asyncio.create_task(self.update_embed_task())
 
     async def send_reminders(self, poll, users):
         link = poll.jump_url
@@ -113,6 +117,17 @@ class Event(commands.Cog):
                 return True
         return False
 
+    async def update_embed_task(self):
+        while True:
+            try:
+                update = self.queue.get(block=False)
+            except queue.Empty:
+                await asyncio.sleep(1)
+                continue
+
+            await self.reaction_callback(payload=update)
+            self.queue.task_done()
+
     async def reaction_callback(self, payload):
         user = self.bot.get_user(payload.user_id)
         if user != self.bot.user and payload.emoji.name in self.NB_EMOJIS:
@@ -158,11 +173,11 @@ class Event(commands.Cog):
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
-        await self.reaction_callback(payload)
+        self.queue.put(payload)
 
     @commands.Cog.listener()
     async def on_raw_reaction_remove(self, payload):
-        await self.reaction_callback(payload)
+        self.queue.put(payload)
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
