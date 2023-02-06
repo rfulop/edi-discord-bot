@@ -1,4 +1,5 @@
 import os
+import locale
 import aiohttp
 from dotenv import load_dotenv
 
@@ -7,6 +8,8 @@ from discord.ext import commands, tasks
 
 
 load_dotenv()
+locale.setlocale(locale.LC_ALL, 'fr_FR.utf8')
+
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = os.getenv('GUILD_ID')
 VOICE_CHANNEL_ID = os.getenv('VOICE_CHANNEL_ID')
