@@ -32,31 +32,26 @@ class Event(commands.Cog):
             dm_channel = await user_obj.create_dm()
             await dm_channel.send(f"N'oublie pas de participer au sondage pour la prochaine session de {role}: {link}")
 
-    @staticmethod
-    async def get_voters(embed):
-        embed_dict = embed.to_dict()
+    async def get_voters(self, msg):
+        reactions = [reaction for reaction in msg.reactions if reaction.emoji in self.NB_EMOJIS]
         voters = []
-        for field in embed_dict['fields']:
-            msg = field['value'].split('\n')
-            if len(msg) < 2:
-                continue
-            voters_str = msg[1]
-            voters += voters_str.split()
+        for r in reactions:
+            voters += [user.mention async for user in r.users() if not user.bot]
         return list(set(voters))
 
     async def find_alerts(self, channel, poll, not_voters):
         alert_send = False
         poll_date = poll.created_at
+        now = datetime.now().astimezone(pytz.timezone('Europe/Paris'))
         async for msg in channel.history(limit=1000):
             if msg.type == MessageType.reply and msg.reference.message_id == poll.id:
                 if msg.content.startswith('Rappel:'):
+                    alert_send = True
                     msg_date = msg.created_at
-                    diff = (msg_date - poll_date).total_seconds() / 3600
+                    diff = (now - msg_date).total_seconds() / 3600
                     if diff > 24:
-                        alert_send = True
                         await self.send_reminders(poll, not_voters)
 
-        now = datetime.now().astimezone(pytz.timezone('Europe/Paris'))
         diff = (now - poll_date).total_seconds() / 3600
         if not alert_send and diff > 24:
             await self.send_reminders(poll, not_voters)
@@ -75,7 +70,7 @@ class Event(commands.Cog):
                             continue
                         role = match.group(1)
                         role = discord.utils.get(guild.roles, name=role)
-                        voters = await self.get_voters(embed)
+                        voters = await self.get_voters(msg)
                         mentions = [user.mention for user in role.members if not user.bot]
                         not_voters = [mention for mention in mentions if mention not in voters]
                         await self.find_alerts(channel, msg, not_voters)
