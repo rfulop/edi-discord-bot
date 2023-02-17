@@ -94,6 +94,7 @@ class MusicPlayer(object):
         self.next = asyncio.Event()
         self.current = None
         self.loop = ctx.bot.loop.create_task(self.player_loop())
+        self.display_playing = True
 
     @classmethod
     def get_str_duration(cls, duration):
@@ -127,7 +128,8 @@ class MusicPlayer(object):
                 self.ctx.guild.voice_client.source
             )
             self.ctx.guild.voice_client.source.volume = .5
-            await self.ctx.cog.send_source_embed(self.ctx, source, embed_title="Now Playing !!!🎶")
+            if self.display_playing:
+                await self.ctx.cog.send_source_embed(self.ctx, source, embed_title="Now Playing !!!🎶")
 
             await self.next.wait()
             self.current = None
@@ -226,6 +228,33 @@ class Music(commands.Cog):
             view.add_item(btn)
 
         await ctx.send(embed=embed, view=view)
+
+    @commands.hybrid_command(name='loop', with_app_command=True, aliases=['lp', 'repeat'],
+                             brief='Loop sur le morceau en cours',
+                             description='Met le morceau en cours en loop pour n répétitions. (maximum 10 fois)')
+    @app_commands.describe(rep='Nombre de répétitions')
+    @app_commands.guild_only()
+    async def loop(self, ctx, rep: int):
+        if not ctx.interaction:
+            await ctx.message.delete()
+
+        if rep <= 0:
+            return await self.send_error_embed(ctx, "Please enter a positive number that corresponds to the "
+                                                    "desired number of repetitions.")
+
+        vc = ctx.voice_client
+        if not vc or not vc.is_playing():
+            return await self.send_error_embed(ctx, "I am currently not playing anything")
+
+        rep = rep if rep <= 10 else 10
+        player = self.get_player(ctx)
+
+        await self.send_source_embed(ctx, player.current, f"Looping over the track for {rep} times 🔄")
+
+        for _ in range(rep):
+            source = YTDLSource(ctx.author)
+            await source.create_source(player.current.webpage_url, bot=self.bot)
+            await player.queue.put(source)
 
     @commands.hybrid_command(name='play', with_app_command=True, aliases=['search', 'pl'],
                              brief="Lance ou met en queue un morceau",
@@ -329,7 +358,7 @@ class Music(commands.Cog):
                              brief="Affiche le morceau en cours", description="Affiche le morceau en cours.")
     @app_commands.guild_only()
     async def now_playing(self, ctx):
-        if not ctx.interaction:
+        if ctx.message and not ctx.interaction:
             await ctx.message.delete()
         vc = await self.get_voice_client(ctx)
         if not vc:
@@ -345,22 +374,35 @@ class Music(commands.Cog):
                              brief="Passer au prochain morceau",
                              description="Passer au prochain morceau. Si aucun morceau n'est en queue: met fin au "
                                          "morceau en cours.")
+    @app_commands.describe(go_to="Passer jusqu'au morceau x")
     @app_commands.guild_only()
-    async def skip(self, ctx):
+    async def skip(self, ctx, go_to: int = 1):
         if not ctx.interaction:
             await ctx.message.delete()
-        vc = await self.get_voice_client(ctx)
-        if not vc:
-            return
-        elif vc.is_paused():
-            pass
-        elif not vc.is_playing():
-            return
+
+        if go_to <= 0:
+            return await self.send_error_embed(ctx, "Please enter a positive number that corresponds to the "
+                                                    "position of the track in the queue.")
 
         player = self.get_player(ctx)
-        skipped = player.current
-        await self.send_source_embed(ctx, skipped, embed_title="Skipping ⏭")
-        vc.stop()
+        player.display_playing = False
+        skipped_url = None
+        for _ in range(go_to):
+            vc = await self.get_voice_client(ctx)
+            if not vc:
+                return
+            elif vc.is_paused():
+                pass
+            elif not vc.is_playing():
+                return
+
+            if skipped_url != player.current.webpage_url:
+                await self.send_source_embed(ctx, player.current, embed_title="Skipping ⏭")
+            skipped_url = player.current.webpage_url
+            vc.stop()
+            await asyncio.sleep(0.1)
+        player.display_playing = True
+        await self.now_playing(ctx)
 
     @commands.hybrid_command(name='join', with_app_command=True, aliases=['connect', 'j'],
                              brief="Rejoint le channel vocal dans lequel se trouve l'utilisateur",

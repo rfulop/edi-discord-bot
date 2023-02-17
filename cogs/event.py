@@ -51,6 +51,7 @@ class Event(commands.Cog):
                     diff = (now - msg_date).total_seconds() / 3600
                     if diff > 24:
                         await self.send_reminders(poll, not_voters)
+                    break
 
         diff = (now - poll_date).total_seconds() / 3600
         if not alert_send and diff > 24:
@@ -176,7 +177,10 @@ class Event(commands.Cog):
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
-        await ctx.reply(error, ephemeral=True)
+        try:
+            await ctx.reply(error, ephemeral=True)
+        except (discord.errors.NotFound, discord.errors.HTTPException) as e:
+            pass
 
     @commands.hybrid_command(name="pick", with_app_command=True, aliases=['date', 'pi'],
                              description="Propose plusieurs dates aux utilisateurs possedant un meme role",
@@ -187,6 +191,11 @@ class Event(commands.Cog):
     @app_commands.guild_only()
     async def pick(self, ctx, role: discord.Role, days: int = 7, delay: int = 0):
         now = datetime.now().astimezone(pytz.timezone('Europe/Paris'))
+        if days <= 0:
+            days = 7
+        if delay < 0:
+            delay = 0
+
         if delay:
             now += timedelta(days=delay)
         mentions = [member.mention for member in role.members if not member.bot]
