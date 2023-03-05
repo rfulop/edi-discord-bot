@@ -14,7 +14,8 @@ from main import GUILD_ID, VOICE_CHANNEL_ID, APP_ID
 
 class Event(commands.Cog):
 
-    NB_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣']
+    NB_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟', '🇦', '🇧', '🇨', '🇩', '🇪', '🇫', '🇬', '🇭',
+                 '🇮', '🇯']
 
     def __init__(self, bot):
         self.bot = bot
@@ -182,6 +183,12 @@ class Event(commands.Cog):
         except (discord.errors.NotFound, discord.errors.HTTPException) as e:
             pass
 
+    async def send_error_embed(self, ctx, error):
+        embed = discord.Embed(description=error, color=discord.Color.dark_red())
+        embed.set_author(icon_url=self.bot.user.display_avatar, name="Something happened 😟")
+        embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
+        await ctx.send(embed=embed)
+
     @commands.hybrid_command(name="pick", with_app_command=True, aliases=['date', 'pi'],
                              description="Propose plusieurs dates aux utilisateurs possedant un meme role",
                              brief="Cree un sondage proposant plusieurs dates pour un rdv")
@@ -193,6 +200,8 @@ class Event(commands.Cog):
         now = datetime.now().astimezone(pytz.timezone('Europe/Paris'))
         if days <= 0:
             days = 7
+        elif days > len(self.NB_EMOJIS):
+            return await self.send_error_embed(ctx, f'"days" parameter has a maximum value of {len(self.NB_EMOJIS)}.')
         if delay < 0:
             delay = 0
 
