@@ -26,8 +26,12 @@ class Event(commands.Cog):
         link = poll.jump_url
         match = re.search(r'session de (.*?)\s*\?', poll.embeds[0].title)
         role = match.group(1)
-        message = f'Rappel: {", ".join(users)} merci de voter pour la date de la prochaine session de {role}: {link}'
-        await poll.reply(content=message)
+        if not users:
+            msg = f"Rappel: L'ensemble des joueurs ont voté, mais aucune date commune n'a été trouvé pour la " \
+                  f"prochaine session de {role}."
+        else:
+            msg = f'Rappel: {", ".join(users)} merci de voter pour la date de la prochaine session de {role}: {link}'
+        await poll.reply(content=msg)
         for user in users:
             user_obj = await self.bot.fetch_user(user[2:-1])
             dm_channel = await user_obj.create_dm()
