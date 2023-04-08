@@ -54,12 +54,12 @@ class Event(commands.Cog):
                     alert_send = True
                     msg_date = msg.created_at
                     diff = (now - msg_date).total_seconds() / 3600
-                    if diff > 24:
+                    if diff >= 24.0:
                         await self.send_reminders(poll, not_voters)
                     break
 
         diff = (now - poll_date).total_seconds() / 3600
-        if not alert_send and diff > 24:
+        if not alert_send and diff >= 24.0:
             await self.send_reminders(poll, not_voters)
 
     @tasks.loop(minutes=60)
@@ -199,8 +199,9 @@ class Event(commands.Cog):
     @app_commands.describe(role="Le role des utilisateurs qui recevront le sondage")
     @app_commands.describe(days="Le nombre de jours proposés dans le sondage. Par défault: 7.")
     @app_commands.describe(delay="Determine le premier jour proposé dans le sondage. Par défault: 0 (soit aujourd'hui)")
+    @app_commands.describe(reminders="Si True, le bot envoie des rappels toutes les 24h aux joueurs n'ayant pas votés")
     @app_commands.guild_only()
-    async def pick(self, ctx, role: discord.Role, days: int = 7, delay: int = 0):
+    async def pick(self, ctx, role: discord.Role, days: int = 7, delay: int = 0, reminders: bool = True):
         now = datetime.now().astimezone(pytz.timezone('Europe/Paris'))
         if days <= 0:
             days = 7
@@ -214,8 +215,12 @@ class Event(commands.Cog):
         mentions = [member.mention for member in role.members if not member.bot]
         mentions_str = ', '.join(mentions)
 
-        embed = discord.Embed(title=f'Quelles dispos pour la prochaine session de {role} ? 🎲',
-                              color=discord.Color.greyple(), description=f'')
+        if reminders:
+            msg = f'Quelles dispos pour la prochaine session de {role} ? 🎲'
+        else:
+            msg = f'Quelles sont vos dispos pour la prochaine session de {role} ? 🎲'
+
+        embed = discord.Embed(title=msg, color=discord.Color.greyple(), description=f'')
         embed.set_author(icon_url=self.bot.user.display_avatar, name=f'{ctx.author.display_name}')
         for i in range(days):
             date_name = f'{self.NB_EMOJIS[i]} - ' + (now + timedelta(days=i)).strftime("%A %d %B %Y").title()
