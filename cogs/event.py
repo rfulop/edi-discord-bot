@@ -453,6 +453,7 @@ class Event(commands.Cog):
     @app_commands.describe(reminders="Si True, le bot envoie des rappels toutes les 24h aux joueurs n'ayant pas votés")
     @app_commands.guild_only()
     async def pick(self, ctx, role: discord.Role, days: int = 7, delay: int = 0, reminders: bool = True):
+        resp_message = await ctx.send(f"Bien reçu {poll_author}, je crée ton sondage pour la table {role.mention} !")
         now = datetime.now().astimezone(pytz.timezone('Europe/Paris'))
         if days <= 0:
             days = 7
@@ -480,6 +481,7 @@ class Event(commands.Cog):
         message = await ctx.send(f'{mentions_str}, vous etes conviés à la table {role.mention} !', embed=embed)
         for emoji in self.NB_EMOJIS[:days]:
             await message.add_reaction(emoji)
+        await resp_message.delete()
 
     @commands.hybrid_command(name="date", with_app_command=True, aliases=['meeting'],
                              description="Invitez les utilisateurs d'un rôle à un sondage pour trouver une date "
@@ -495,6 +497,8 @@ class Event(commands.Cog):
         email = "jenaipas@de.email"
         start_date = (datetime.utcnow() + timedelta(days=delay)).strftime('%d/%m/%Y')
         end_date = (datetime.utcnow() + timedelta(days=days + delay)).strftime('%d/%m/%Y')
+
+        resp_message = await ctx.send(f"Bien reçu {poll_author}, je crée ton sondage pour la table {role.mention} !")
 
         players = [member.display_name for member in role.members if not member.bot]
         title = f'Session pour la table {role}'
@@ -560,6 +564,7 @@ class Event(commands.Cog):
         poll_result['message_id'] = message.id
 
         self.save_poll_info(title, poll_result)
+        await resp_message.delete()
 
 
 async def setup(bot):
