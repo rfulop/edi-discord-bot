@@ -162,13 +162,12 @@ class Event(commands.Cog):
                 file.truncate()
                 json.dump(polls, file, indent=4)
 
-    async def finalize_poll_and_notify(self, poll_data, date_found, all_responded):
+    async def finalize_poll_and_notify(self, poll_data, date_found):
         """
         Envoie un message de clôture du sondage à l'utilisateur qui l'a créé et dans le canal où il a été créé. Enfin,
         supprime le sondage du fichier de suivi.
         :param poll_data: Dictionnaire contenant les informations du sondage
         :param date_found: Date trouvée par le sondage
-        :param all_responded: Booléen indiquant si tous les votants ont voté
         :return:
         """
         guild_id = poll_data['guild_id']
@@ -199,8 +198,6 @@ class Event(commands.Cog):
             message = random.choice(DATE_FOUND_MESSAGES).format(mentions_str, role.mention, date_found)
             event = await self.create_event(guild, role, mentions_str, date)
 
-        elif all_responded:
-            message = random.choice(DATE_NOT_FOUND_MESSAGES).format(role.mention)
         else:
             message = random.choice(FAILED_POLL_MESSAGES).format(mentions_str, role.mention)
 
@@ -214,6 +211,41 @@ class Event(commands.Cog):
                     await channel.send(event.url)
             except discord.HTTPException as e:
                 print(f"Erreur lors de l'envoi d'un message dans le canal {channel.name}: {e}")
+
+    async def notify_all_responded_date_not_found(self, poll_data):
+        """
+        Si tous les votants ont voté pour un sondage mais qu'aucune date commune n'a été trouvée, envoie un message de
+        notification. Un message est envoyé dans le channel toutes les 24 heures maximum.
+        Ne supprime pas le sondage du fichier de suivi et du channel.
+        :param poll_data: Dictionnaire contenant les informations du sondage
+        :return: Si une notification a été envoyée, retourne la date de la dernière notification, sinon retourne None
+        """
+        last_channel_notification = poll_data.get('last_channel_notification')
+        if last_channel_notification:
+            last_notification_date = datetime.strptime(last_channel_notification, '%Y-%m-%d %H:%M:%S')
+        else:
+            last_notification_date = None
+        if not last_notification_date or datetime.now() - last_notification_date >=\
+                timedelta(minutes=self.REMINDER_INTERVAL):
+            guild_id = poll_data['guild_id']
+            channel_id = poll_data['channel_id']
+            role_id = int(poll_data['role_id'])
+
+            guild = self.bot.get_guild(guild_id)
+            role = guild.get_role(role_id)
+
+            message = random.choice(DATE_NOT_FOUND_MESSAGES).format(role.mention)
+
+            channel = await self.bot.fetch_channel(channel_id)
+            if channel:
+                try:
+                    await channel.send(message)
+                    poll_data['last_channel_notification'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                except discord.HTTPException as e:
+                    print(f"Erreur lors de l'envoi d'un message dans le canal {channel.name}: {e}")
+
+            return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        return None
 
     async def check_voters(self):
         """
@@ -233,7 +265,7 @@ class Event(commands.Cog):
 
                 if expire_date < current_date:
                     expired_polls.append(poll_name)
-                    await self.finalize_poll_and_notify(polls_data[poll_name], None, None)
+                    await self.finalize_poll_and_notify(polls_data[poll_name], None)
                     to_update = True
                 else:
                     check_data = await self.framadate.analyze_csv(poll_info['admin_url'])
@@ -242,10 +274,15 @@ class Event(commands.Cog):
                     all_responded = check_data['all_responded']
 
                     if all_responded:
-                        await self.finalize_poll_and_notify(poll_info, date_found, all_responded)
                         if date_found:
+                            await self.finalize_poll_and_notify(poll_info, date_found)
                             expired_polls.append(poll_name)
                             to_update = True
+                        else:
+                            notification_sent = await self.notify_all_responded_date_not_found(poll_info)
+                            if notification_sent:
+                                polls_data[poll_name]['last_channel_notification'] = notification_sent
+                                to_update = True
                     elif await self.should_send_reminder(polls_data.get(poll_name)):
                         await self.send_reminders_date_poll(non_responders, poll_info)
                         new_reminder_count = poll_info['reminder_count'] + 1
@@ -457,6 +494,7 @@ class Event(commands.Cog):
     @app_commands.describe(reminders="Si True, le bot envoie des rappels toutes les 24h aux joueurs n'ayant pas votés")
     @app_commands.guild_only()
     async def pick(self, ctx, role: discord.Role, days: int = 7, delay: int = 0, reminders: bool = True):
+        poll_author = ctx.author.display_name
         resp_message = await ctx.send(f"Bien reçu {poll_author}, je crée ton sondage pour la table {role.mention} !")
         now = datetime.now().astimezone(pytz.timezone('Europe/Paris'))
         if days <= 0:
@@ -524,6 +562,7 @@ class Event(commands.Cog):
         poll_result['guild_id'] = ctx.guild.id
         poll_result['send_reminders'] = True if reminders else False
         poll_result['reminder_count'] = 0
+        poll_result['last_channel_notification'] = None
 
         asyncio.create_task(self.add_players_to_poll(poll_result, players))
 
