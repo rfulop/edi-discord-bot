@@ -102,13 +102,14 @@ class FramadateAPI(object):
         async with aiohttp.ClientSession() as session:
             await session.post(admin_url, data=data)
 
-    async def analyze_csv(self, admin_url):
+    async def analyze_csv(self, admin_url, players_count):
         """
         Analyse le fichier CSV du sondage et retourne les votants n'ayant pas répondu, la date choisie et
         si tout le monde a répondu.
         Selectionne la date avec le plus de votes positifs, et si plusieurs dates ont le même nombre de votes positifs,
         selectionne la date avec le moins de votes "si nécessaire".
         :param admin_url: URL de l'administration du sondage
+        :param players_count: Nombre de joueurs
         :return: Dictionnaire contenant les votants n'ayant pas répondu, la date choisie et si tout le monde a répondu
         """
         poll_id = admin_url.split('/')[-2]
@@ -154,11 +155,9 @@ class FramadateAPI(object):
                         if_needed_count = slot_if_needed_responses[slot]
                         total_count = yes_count + if_needed_count
 
-                        if yes_count > max_yes_responses and yes_count == total_count:
+                        if yes_count > max_yes_responses and total_count == players_count:
                             date_found = f"{slot[0]} {slot[1]}"
                             max_yes_responses = yes_count
-                        elif yes_count == max_yes_responses and if_needed_count > 0:
-                            continue
 
                     all_responded = not non_responders
 

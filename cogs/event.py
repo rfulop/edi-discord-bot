@@ -268,7 +268,7 @@ class Event(commands.Cog):
                     await self.finalize_poll_and_notify(polls_data[poll_name], None)
                     to_update = True
                 else:
-                    check_data = await self.framadate.analyze_csv(poll_info['admin_url'])
+                    check_data = await self.framadate.analyze_csv(poll_info['admin_url'], poll_info['players_count'])
                     non_responders = check_data['non_responders']
                     date_found = check_data['date_found']
                     all_responded = check_data['all_responded']
