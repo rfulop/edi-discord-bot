@@ -115,8 +115,10 @@ class Event(commands.Cog):
         :param poll_info: Dictionnaire contenant les informations du sondage
         :return:
         """
-        role = self.bot.guilds[0].get_role(int(poll_info['role_id']))
-
+        guild = self.bot.get_guild(poll_info['guild_id'])
+        if not guild:
+            return None
+        role = guild.get_role(int(poll_info['role_id']))
         if role:
             for non_responder_name in non_responders:
                 member = discord.utils.find(lambda m: m.display_name == non_responder_name and role in m.roles,
@@ -169,11 +171,13 @@ class Event(commands.Cog):
         :param all_responded: Booléen indiquant si tous les votants ont voté
         :return:
         """
+        guild_id = poll_data['guild_id']
         channel_id = poll_data['channel_id']
         role_id = int(poll_data['role_id'])
         message_id = int(poll_data['message_id'])
 
-        role = self.bot.guilds[0].get_role(role_id)
+        guild = self.bot.get_guild(guild_id)
+        role = guild.get_role(role_id)
 
         mentions = [member.mention for member in role.members if not member.bot]
         mentions_str = ', '.join(mentions)
@@ -517,6 +521,7 @@ class Event(commands.Cog):
         poll_result['role_id'] = role.id
         poll_result['creator_id'] = ctx.author.id
         poll_result['channel_id'] = ctx.channel.id
+        poll_result['guild_id'] = ctx.guild.id
         poll_result['send_reminders'] = True if reminders else False
         poll_result['reminder_count'] = 0
 
