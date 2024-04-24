@@ -27,6 +27,10 @@ class Event(commands.Cog):
     POLLS_PATH = 'cogs/temp/polls.json'
     CHECK_VOTERS_INTERVAL = 1  # minutes
     REMINDER_INTERVAL = 60*24  # minutes
+    POLL_DATE_FORMAT = '%d/%m/%Y'
+    EXTENDED_POLL_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+    SESSION_SEARCH_REGEX = r'session de (.*?)\s*\?'
+    TIMEZONE_STR = 'Europe/Paris'
 
     def __init__(self, bot):
         self.bot = bot
@@ -78,12 +82,13 @@ class Event(commands.Cog):
         :param poll_data: Dictionnaire contenant les informations du sondage
         :return:
         """
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now = datetime.now(tz=pytz.timezone(self.TIMEZONE_STR)).strftime(self.EXTENDED_POLL_DATE_FORMAT)
         formatted_poll_name = f'{poll_name} - {now}'
 
         polls_data = self.load_or_initialize_polls()
 
-        poll_data['created_at'] = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        poll_data['created_at'] = (datetime.now(tz=pytz.timezone(self.TIMEZONE_STR))
+                                   .strftime(self.EXTENDED_POLL_DATE_FORMAT))
         poll_data['last_reminder_sent'] = now
 
         polls_data[formatted_poll_name] = poll_data
@@ -121,8 +126,10 @@ class Event(commands.Cog):
         role = guild.get_role(int(poll_info['role_id']))
         if role:
             for non_responder_name in non_responders:
-                member = discord.utils.find(lambda m: m.display_name == non_responder_name and role in m.roles,
-                                            self.bot.get_all_members())
+                member = discord.utils.find(
+                    lambda m, name=non_responder_name: m.display_name == name and role in m.roles,
+                    self.bot.get_all_members())
+
                 if member:
                     try:
                         message = self.choose_reminder_message(poll_info['reminder_count'],
@@ -143,8 +150,9 @@ class Event(commands.Cog):
         if poll_info and 'last_reminder_sent' in poll_info:
             last_reminder = poll_info['last_reminder_sent']
             if last_reminder:
-                last_reminder_date = datetime.strptime(last_reminder, '%Y-%m-%d %H:%M:%S')
-                if datetime.now() - last_reminder_date >= timedelta(minutes=self.REMINDER_INTERVAL):
+                last_reminder_date = datetime.strptime(last_reminder, self.EXTENDED_POLL_DATE_FORMAT)
+                if (datetime.now(tz=pytz.timezone(self.TIMEZONE_STR)) -
+                        last_reminder_date >= timedelta(minutes=self.REMINDER_INTERVAL)):
                     return True
         return False
 
@@ -222,10 +230,10 @@ class Event(commands.Cog):
         """
         last_channel_notification = poll_data.get('last_channel_notification')
         if last_channel_notification:
-            last_notification_date = datetime.strptime(last_channel_notification, '%Y-%m-%d %H:%M:%S')
+            last_notification_date = datetime.strptime(last_channel_notification, self.EXTENDED_POLL_DATE_FORMAT)
         else:
             last_notification_date = None
-        if not last_notification_date or datetime.now() - last_notification_date >=\
+        if not last_notification_date or datetime.now(tz=pytz.timezone(self.TIMEZONE_STR)) - last_notification_date >=\
                 timedelta(minutes=self.REMINDER_INTERVAL):
             guild_id = poll_data['guild_id']
             channel_id = poll_data['channel_id']
@@ -240,11 +248,12 @@ class Event(commands.Cog):
             if channel:
                 try:
                     await channel.send(message)
-                    poll_data['last_channel_notification'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    poll_data['last_channel_notification'] = (datetime.now(tz=pytz.timezone(self.TIMEZONE_STR))
+                                                              .strftime(self.EXTENDED_POLL_DATE_FORMAT))
                 except discord.HTTPException as e:
                     print(f"Erreur lors de l'envoi d'un message dans le canal {channel.name}: {e}")
 
-            return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            return datetime.now(tz=pytz.timezone(self.TIMEZONE_STR)).strftime(self.EXTENDED_POLL_DATE_FORMAT)
         return None
 
     async def check_voters(self):
@@ -255,13 +264,13 @@ class Event(commands.Cog):
         """
         with open(self.POLLS_PATH, 'r+') as file:
             polls_data = json.load(file)
-            current_date = datetime.now()
+            current_date = datetime.now(tz=pytz.timezone(self.TIMEZONE_STR))
 
             expired_polls = []
             to_update = False
 
             for poll_name, poll_info in polls_data.items():
-                expire_date = datetime.strptime(poll_info['expire_at'], '%d/%m/%Y')
+                expire_date = datetime.strptime(poll_info['expire_at'], self.POLL_DATE_FORMAT)
 
                 if expire_date < current_date:
                     expired_polls.append(poll_name)
@@ -286,7 +295,8 @@ class Event(commands.Cog):
                     elif await self.should_send_reminder(polls_data.get(poll_name)):
                         await self.send_reminders_date_poll(non_responders, poll_info)
                         new_reminder_count = poll_info['reminder_count'] + 1
-                        polls_data.get(poll_name)['last_reminder_sent'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        polls_data.get(poll_name)['last_reminder_sent'] = datetime.now(
+                            tz=pytz.timezone(self.TIMEZONE_STR)).strftime(self.EXTENDED_POLL_DATE_FORMAT)
                         polls_data.get(poll_name)['reminder_count'] = new_reminder_count
                         to_update = True
 
@@ -299,7 +309,7 @@ class Event(commands.Cog):
 
     async def send_reminders(self, poll, users):
         link = poll.jump_url
-        match = re.search(r'session de (.*?)\s*\?', poll.embeds[0].title)
+        match = re.search(self.SESSION_SEARCH_REGEX, poll.embeds[0].title)
         role = match.group(1)
         if not users:
             msg = f"Rappel: L'ensemble des joueurs ont voté, mais aucune date commune n'a été trouvé pour la " \
@@ -322,7 +332,7 @@ class Event(commands.Cog):
     async def find_alerts(self, channel, poll, not_voters):
         alert_send = False
         poll_date = poll.created_at
-        now = datetime.now().astimezone(pytz.timezone('Europe/Paris'))
+        now = datetime.now(tz=pytz.timezone(self.TIMEZONE_STR))
         async for msg in channel.history(limit=1000):
             if msg.type == MessageType.reply and msg.reference.message_id == poll.id:
                 if msg.content.startswith('Rappel:'):
@@ -345,7 +355,7 @@ class Event(commands.Cog):
                 if msg.author.bot and msg.author.id == int(APP_ID):
                     if msg.embeds and msg.embeds[0].title:
                         embed = msg.embeds[0]
-                        match = re.search(r'session de (.*?)\s*\?', embed.title)
+                        match = re.search(self.SESSION_SEARCH_REGEX, embed.title)
                         if not match:
                             continue
                         role = match.group(1)
@@ -362,12 +372,12 @@ class Event(commands.Cog):
 
     async def create_event(self, guild: Guild, role: Role, users: str, date: datetime) -> ScheduledEvent:
 
-        current_time = datetime.now().astimezone(pytz.timezone('Europe/Paris'))
+        current_time = datetime.now(tz=pytz.timezone(self.TIMEZONE_STR))
         current_time_adjusted = current_time + timedelta(minutes=30)
-        event_start = date.replace(hour=20, minute=0, second=0).astimezone(pytz.timezone('Europe/Paris'))
+        event_start = date.replace(hour=20, minute=0, second=0).astimezone(pytz.timezone(self.TIMEZONE_STR))
         if event_start < current_time_adjusted:
             event_start = current_time_adjusted
-        event_end = date.replace(hour=23, minute=59, second=0).astimezone(pytz.timezone('Europe/Paris'))
+        event_end = date.replace(hour=23, minute=59, second=0).astimezone(pytz.timezone(self.TIMEZONE_STR))
         if event_end < current_time_adjusted:
             event_end = current_time_adjusted
 
@@ -445,7 +455,7 @@ class Event(commands.Cog):
 
             if date_found:
                 date = datetime.strptime(date_found.split('- ')[1], '%A %d %B %Y')
-                match = re.search(r'session de (.*?)\s*\?', embed.title)
+                match = re.search(self.SESSION_SEARCH_REGEX, embed.title)
                 role = match.group(1)
                 guild = self.bot.get_guild(payload.guild_id)
                 role = discord.utils.get(guild.roles, name=role)
@@ -469,7 +479,7 @@ class Event(commands.Cog):
     async def cog_command_error(self, ctx, error: Exception) -> None:
         try:
             await ctx.reply(str(error), ephemeral=True)
-        except (discord.errors.NotFound, discord.errors.HTTPException) as e:
+        except (discord.errors.NotFound, discord.errors.HTTPException):
             pass
 
     async def send_error_embed(self, ctx, error):
@@ -496,7 +506,7 @@ class Event(commands.Cog):
     async def pick(self, ctx, role: discord.Role, days: int = 7, delay: int = 0, reminders: bool = True):
         poll_author = ctx.author.display_name
         resp_message = await ctx.send(f"Bien reçu {poll_author}, je crée ton sondage pour la table {role.mention} !")
-        now = datetime.now().astimezone(pytz.timezone('Europe/Paris'))
+        now = datetime.now(tz=pytz.timezone(self.TIMEZONE_STR))
         if days <= 0:
             days = 7
         elif days > len(self.NB_EMOJIS):
@@ -514,7 +524,7 @@ class Event(commands.Cog):
         else:
             msg = f'Quelles sont vos dispos pour la prochaine session de {role} ? 🎲'
 
-        embed = discord.Embed(title=msg, color=discord.Color.greyple(), description=f'')
+        embed = discord.Embed(title=msg, color=discord.Color.greyple())
         embed.set_author(icon_url=self.bot.user.display_avatar, name=f'{ctx.author.display_name}')
         for i in range(days):
             date_name = f'{self.NB_EMOJIS[i]} - ' + (now + timedelta(days=i)).strftime("%A %d %B %Y").title()
@@ -537,8 +547,10 @@ class Event(commands.Cog):
     async def date_poll(self, ctx, role: discord.Role, days: int = 7, delay: int = 0, reminders: bool = True):
         poll_author = ctx.author.display_name
         email = "jenaipas@de.email"
-        start_date = (datetime.utcnow() + timedelta(days=delay)).strftime('%d/%m/%Y')
-        end_date = (datetime.utcnow() + timedelta(days=days + delay)).strftime('%d/%m/%Y')
+        start_date = (datetime.now(tz=pytz.timezone(self.TIMEZONE_STR)) +
+                      timedelta(days=delay)).strftime(self.POLL_DATE_FORMAT)
+        end_date = (datetime.now(tz=pytz.timezone(self.TIMEZONE_STR)) +
+                    timedelta(days=days + delay)).strftime(self.POLL_DATE_FORMAT)
 
         resp_message = await ctx.send(f"Bien reçu {poll_author}, je crée ton sondage pour la table {role.mention} !")
 
@@ -592,8 +604,8 @@ class Event(commands.Cog):
         embed.set_thumbnail(url=random.choice(poll_images))
         embed.add_field(
             name="Participez au sondage !",
-            value=f"Pour voter, clique sur \"Modifier la ligne\", *à gauche de **ton** pseudo*. __N'entre pas un "
-                  f"nouveau nom !__",
+            value="Pour voter, clique sur \"Modifier la ligne\", *à gauche de **ton** pseudo*. __N'entre pas un "
+                  "nouveau nom !__",
             inline=False
         )
         embed.add_field(

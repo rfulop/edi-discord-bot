@@ -6,7 +6,6 @@ import discord
 import validators
 import yt_dlp as youtube_dl
 from yt_dlp.utils import DownloadError
-from async_timeout import timeout
 from discord import Embed, app_commands
 from discord.ext import commands
 from discord.ext.commands.errors import CommandInvokeError
@@ -58,7 +57,7 @@ class YTDL(object):
         'options': '-vn'
     }
 
-    ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
+    youtube_dl = youtube_dl.YoutubeDL(ytdl_format_options)
 
 
 class YTDLSource(object):
@@ -73,7 +72,7 @@ class YTDLSource(object):
     async def create_source(self, search, bot):
         try:
             loop = bot.loop or asyncio.get_event_loop()
-            to_run = partial(YTDL.ytdl.extract_info, url=search, download=False)
+            to_run = partial(YTDL.youtube_dl.extract_info, url=search, download=False)
             data = await loop.run_in_executor(None, to_run)
         except DownloadError:
             raise DownloadError("Youtube did not accept the request. Please retry.")
@@ -114,7 +113,7 @@ class MusicPlayer(object):
             self.next.clear()
 
             try:
-                async with timeout(20):
+                async with asyncio.timeout(20):
                     source = await self.queue.get()
             except asyncio.TimeoutError:
                 return self.destroy(self.ctx.guild)
@@ -139,6 +138,10 @@ class MusicPlayer(object):
 
 
 class Music(commands.Cog):
+
+    NOT_CONNECTED_MESSAGE = "I'm not connected to a voice channel."
+    NOT_PLAYING_MESSAGE = "I am currently not playing anything."
+
     def __init__(self, bot):
         self.bot = bot
         self.queue = {}
@@ -211,7 +214,7 @@ class Music(commands.Cog):
     async def get_voice_client(self, ctx):
         vc = ctx.voice_client
         if not vc or not vc.is_connected():
-            await self.send_error_embed(ctx, "I'm not connected to a voice channel.")
+            await self.send_error_embed(ctx, self.NOT_CONNECTED_MESSAGE)
         return vc
 
     async def list_choices(self, ctx, search):
@@ -244,7 +247,7 @@ class Music(commands.Cog):
 
         vc = ctx.voice_client
         if not vc or not vc.is_playing():
-            return await self.send_error_embed(ctx, "I am currently not playing anything")
+            return await self.send_error_embed(ctx, self.NOT_PLAYING_MESSAGE)
 
         rep = rep if rep <= 10 else 10
         player = self.get_player(ctx)
@@ -293,7 +296,7 @@ class Music(commands.Cog):
         vc = ctx.voice_client
 
         if not vc or not vc.is_playing():
-            return await self.send_error_embed(ctx, "I am currently not playing anything")
+            return await self.send_error_embed(ctx, self.NOT_PLAYING_MESSAGE)
         elif vc.is_paused():
             return
 
@@ -366,7 +369,7 @@ class Music(commands.Cog):
 
         player = self.get_player(ctx)
         if not player.current:
-            return await self.send_error_embed(ctx, "I am currently not playing anything")
+            return await self.send_error_embed(ctx, self.NOT_PLAYING_MESSAGE)
 
         await self.send_source_embed(ctx, player.current, embed_title="Now Playing 🎶")
 
@@ -391,8 +394,6 @@ class Music(commands.Cog):
             vc = await self.get_voice_client(ctx)
             if not vc:
                 return
-            elif vc.is_paused():
-                pass
             elif not vc.is_playing():
                 return
 
