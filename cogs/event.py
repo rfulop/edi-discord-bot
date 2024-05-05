@@ -151,6 +151,7 @@ class Event(commands.Cog):
             last_reminder = poll_info['last_reminder_sent']
             if last_reminder:
                 last_reminder_date = datetime.strptime(last_reminder, self.EXTENDED_POLL_DATE_FORMAT)
+                last_reminder_date = last_reminder_date.replace(tzinfo=pytz.timezone(self.TIMEZONE_STR))
                 if (datetime.now(tz=pytz.timezone(self.TIMEZONE_STR)) -
                         last_reminder_date >= timedelta(minutes=self.REMINDER_INTERVAL)):
                     return True
@@ -191,7 +192,9 @@ class Event(commands.Cog):
 
         event = None
         if date_found:
-            date_str, hour_str, _ = date_found.split(' ')
+            date_parts = date_found.split(' ')
+            date_str = date_parts[0]
+            hour_str = date_parts[1]
             day, month, year = date_str.split('/')
             if hour_str == 'Fin':
                 hour = 18
@@ -202,6 +205,7 @@ class Event(commands.Cog):
             else:
                 hour = 20
             date = datetime(int(year), int(month), int(day), hour, 0, 0)
+            date = date.replace(tzinfo=pytz.timezone(self.TIMEZONE_STR))
             guild = role.guild
             message = random.choice(DATE_FOUND_MESSAGES).format(mentions_str, role.mention, date_found)
             event = await self.create_event(guild, role, mentions_str, date)
@@ -231,6 +235,7 @@ class Event(commands.Cog):
         last_channel_notification = poll_data.get('last_channel_notification')
         if last_channel_notification:
             last_notification_date = datetime.strptime(last_channel_notification, self.EXTENDED_POLL_DATE_FORMAT)
+            last_notification_date = last_notification_date.replace(tzinfo=pytz.timezone(self.TIMEZONE_STR))
         else:
             last_notification_date = None
         if not last_notification_date or datetime.now(tz=pytz.timezone(self.TIMEZONE_STR)) - last_notification_date >=\
@@ -271,6 +276,7 @@ class Event(commands.Cog):
 
             for poll_name, poll_info in polls_data.items():
                 expire_date = datetime.strptime(poll_info['expire_at'], self.POLL_DATE_FORMAT)
+                expire_date = expire_date.replace(tzinfo=pytz.timezone(self.TIMEZONE_STR))
 
                 if expire_date < current_date:
                     expired_polls.append(poll_name)
@@ -455,6 +461,7 @@ class Event(commands.Cog):
 
             if date_found:
                 date = datetime.strptime(date_found.split('- ')[1], '%A %d %B %Y')
+                date = date.replace(tzinfo=pytz.timezone(self.TIMEZONE_STR))
                 match = re.search(self.SESSION_SEARCH_REGEX, embed.title)
                 role = match.group(1)
                 guild = self.bot.get_guild(payload.guild_id)
