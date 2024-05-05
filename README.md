@@ -59,6 +59,24 @@ VOICE_CHANNEL_ID = "Voice channel ID"
 APP_ID = "Application ID"
 ```
 
+Prerequisites for the Music Cog
+-------------------------------
+
+The Music cog of **Edi Discord Bot** requires [FFmpeg](https://ffmpeg.org/) to be installed on the system where the bot is running. FFmpeg is used to process audio streams, which is essential for the music playback functionality.
+
+### Installing FFmpeg
+
+*   **Windows:**
+    1.  Download the FFmpeg binaries from [FFmpeg.org](https://ffmpeg.org/download.html).
+    2.  Extract the downloaded zip file.
+    3.  Add the path to the FFmpeg bin folder (e.g., `C:\path\to\ffmpeg\bin`) to your system's PATH environment variable.
+*   **macOS:**
+    1.  You can install FFmpeg using [Homebrew](https://brew.sh/) by running: `brew install ffmpeg`
+*   **Linux:**
+    1.  Most Linux distributions can install FFmpeg directly from the package manager. For example, on Ubuntu, you can run: `sudo apt install ffmpeg`
+
+Ensure that FFmpeg is correctly installed and accessible from the command line by running `ffmpeg -version`. If the command prints the FFmpeg version information, then it is installed correctly.
+
 Installation
 ------------
 
