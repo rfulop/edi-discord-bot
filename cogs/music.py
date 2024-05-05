@@ -24,13 +24,14 @@ class YTDLChoiceButton(Button):
         self.embed = embed
 
     async def callback(self, interaction):
+        await interaction.response.defer()
         url = f'https://www.youtube.com{self.url_suffix}'
         player = self.cog.get_player(self.ctx)
         source = YTDLSource(self.ctx.author)
+        await interaction.message.delete()
         await source.create_source(url, bot=self.cog.bot)
         await self.cog.send_source_embed(self.ctx, source, "Put at the end of the queue 📀")
         await player.queue.put(source)
-        await interaction.message.delete()
 
 
 class YTDL(object):
