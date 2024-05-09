@@ -284,6 +284,8 @@ class Event(commands.Cog):
                     to_update = True
                 else:
                     check_data = await self.framadate.analyze_csv(poll_info['admin_url'], poll_info['players_count'])
+                    if not check_data:
+                        return
                     non_responders = check_data['non_responders']
                     date_found = check_data['date_found']
                     all_responded = check_data['all_responded']
@@ -573,6 +575,8 @@ class Event(commands.Cog):
             num_days=days,
             end_date=end_date
         )
+        if not poll_result:
+            return await self.send_error_embed(ctx, "Impossible de créer le sondage.")
 
         poll_result['players_count'] = len(players)
         poll_result['role_id'] = role.id
