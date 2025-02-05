@@ -1,11 +1,13 @@
-import csv
 import logging
-from datetime import datetime, timedelta
-from io import StringIO
-
-import aiohttp
 import requests
+import aiohttp
+import csv
+from io import StringIO
+from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
+
+
+logger = logging.getLogger(__name__)
 
 
 class FramadateAPI(object):
@@ -22,6 +24,7 @@ class FramadateAPI(object):
 
     def __init__(self):
         self.session = requests.Session()
+        logger.info("FramadateAPI initialized.")
 
     def handle_http_errors(self, response):
         """
@@ -31,11 +34,12 @@ class FramadateAPI(object):
         """
         try:
             response.raise_for_status()
+            logger.info(f"Request to {response.url} succeeded.")
         except requests.HTTPError as http_err:
-            logging.error(self.HTTP_ERROR_MESSAGE.format(http_err, response.url))
+            logger.error(self.HTTP_ERROR_MESSAGE.format(http_err, response.url))
             raise http_err
         except Exception as err:
-            logging.error(self.API_ERROR_MESSAGE.format(response.url, err))
+            logger.error(self.API_ERROR_MESSAGE.format(response.url, err))
             raise err
 
     @staticmethod
@@ -52,6 +56,8 @@ class FramadateAPI(object):
         weekday_slots = ["Fin d'aprem", "Soir"]
         weekend_slots = ["Après-midi", "Fin d'aprem", "Soir"]
 
+        logger.info(f"Generating schedule starting from {start_date} for {num_days} days.")
+
         for day in range(num_days):
             current_date = start + timedelta(days=day)
             date_str = current_date.strftime('%d/%m/%Y')
@@ -66,6 +72,7 @@ class FramadateAPI(object):
                     data.append((f'horaires{day}[]', slot))
 
         data.append(('choixheures', 'Continuer'))
+        logger.info(f"Generated schedule for {num_days} days.")
         return data
 
     @staticmethod
@@ -78,7 +85,10 @@ class FramadateAPI(object):
         soup = BeautifulSoup(html, 'html.parser')
         poll_link_tag = soup.find('input', {'id': 'public-link'})
         if poll_link_tag:
+            logger.info("Public poll link retrieved successfully.")
             return poll_link_tag.get('value')
+        logger.warning("No public poll link found.")
+        return None
 
     @staticmethod
     def get_control_token(html):
@@ -90,6 +100,10 @@ class FramadateAPI(object):
         soup = BeautifulSoup(html, 'html.parser')
         hidden_input = soup.find("input", {"name": "control"})
         control_token = hidden_input["value"] if hidden_input else None
+        if control_token:
+            logger.info("Control token retrieved successfully.")
+        else:
+            logger.warning("No control token found.")
         return control_token
 
     @staticmethod
@@ -109,8 +123,10 @@ class FramadateAPI(object):
         }
         data.update(choices)
 
+        logger.info(f"Adding player {player_name} to poll at {admin_url}.")
         async with aiohttp.ClientSession() as session:
             await session.post(admin_url, data=data)
+        logger.info(f"Player {player_name} added successfully.")
 
     async def analyze_csv(self, admin_url, players_count):
         """
@@ -125,6 +141,8 @@ class FramadateAPI(object):
         """
         poll_id = admin_url.split('/')[-2]
         csv_url = f"{self.BASE_URL}/exportcsv.php?admin={poll_id}"
+
+        logger.info(f"Analyzing CSV data for poll ID {poll_id}.")
 
         async with aiohttp.ClientSession() as session:
             async with session.get(csv_url) as response:
@@ -176,6 +194,7 @@ class FramadateAPI(object):
 
                 all_responded = not non_responders
 
+                logger.info(f"CSV analysis complete. Date found: {date_found}, All responded: {all_responded}")
                 return {
                     "non_responders": non_responders,
                     "date_found": date_found,
@@ -207,11 +226,14 @@ class FramadateAPI(object):
             'type': poll_type,
             'gotostep2': poll_type,
         }
+        logging.info(f"Initiating poll '{title}' by {poll_author} ({poll_type}, {lang}).")
         response = self.session.post(self.BASE_URL + self.CREATION_ENDPOINT, params=params, data=data)
         try:
             self.handle_http_errors(response)
         except (requests.HTTPError, requests.RequestException):
+            logging.error("Failed to initiate poll.")
             return False
+        logging.info("Poll initiated successfully.")
         return True
 
     def set_poll_dates(self, date_entries):
@@ -220,11 +242,14 @@ class FramadateAPI(object):
         :param date_entries: Liste des dates au format dd/mm/yyyy
         :return: True si les dates ont ete ajoutees avec succes, False sinon
         """
+        logging.info("Setting poll dates.")
         response = self.session.post(self.BASE_URL + self.DATE_POLL_ENDPOINT, data=date_entries)
         try:
             self.handle_http_errors(response)
         except (requests.HTTPError, requests.RequestException):
+            logging.error("Failed to set poll dates.")
             return False
+        logging.info("Poll dates set successfully.")
         return True
 
     def confirm_poll(self, end_date):
@@ -233,12 +258,15 @@ class FramadateAPI(object):
         :param end_date: Date de fin du sondage au format dd/mm/yyyy
         :return: Page d'administration du sondage si le sondage a ete confirme avec succes, None sinon
         """
+        logging.info(f"Confirming poll with end date {end_date}.")
         data = {'enddate': end_date, 'confirmation': 'confirmation'}
         response = self.session.post(self.BASE_URL + self.DATE_POLL_ENDPOINT, data=data)
         try:
             self.handle_http_errors(response)
         except (requests.HTTPError, requests.RequestException):
+            logging.error("Failed to confirm poll.")
             return None
+        logging.info("Poll confirmed successfully.")
         return response
 
     def create_date_poll(self, poll_author, title, description, email, start_date, num_days, end_date):
@@ -253,22 +281,33 @@ class FramadateAPI(object):
         :param end_date: Date de fin du sondage au format dd/mm/yyyy
         :return: Dictionnaire contenant les informations du sondage
         """
+        logging.info(f"Creating date poll '{title}' by {poll_author}.")
         is_poll_initiated = self.initiate_poll(poll_author=poll_author, title=title,
                                                description=description, email=email)
         if not is_poll_initiated:
+            logging.error("Failed to initiate poll.")
             return None
+
+        logging.info("Generating date schedule for the poll.")
         date_entries = self.generate_schedule(start_date, num_days)
         is_dates_set = self.set_poll_dates(date_entries)
         if not is_dates_set:
+            logging.error("Failed to set poll dates.")
             return None
+
         response = self.confirm_poll(end_date)
         if not response:
+            logging.error("Failed to confirm poll.")
             return None
+
         admin_url = response.url
         html = response.content
         public_url = self.get_public_poll_link(html)
         control_token = self.get_control_token(html)
         choices_count = len(date_entries) - 1 - num_days
+
+        logging.info("Poll created successfully with public URL and control token.")
+
         return {
             'admin_url': admin_url,
             'public_url': public_url,

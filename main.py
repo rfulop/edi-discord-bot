@@ -1,6 +1,7 @@
 import os
 import locale
 import aiohttp
+import logging
 from dotenv import load_dotenv
 
 import discord
@@ -15,6 +16,12 @@ GUILD_ID = os.getenv('GUILD_ID')
 VOICE_CHANNEL_ID = os.getenv('VOICE_CHANNEL_ID')
 APP_ID = os.getenv('APP_ID')
 
+
+logging.basicConfig(
+    format="[%(asctime)s] [%(filename)s:%(lineno)d] %(levelname)s - %(message)s",
+    level=logging.INFO,
+    handlers=[logging.FileHandler("bot_logs.log"), logging.StreamHandler()]
+)
 
 class MyBot(commands.Bot):
     def __init__(self, command_prefix, *, intents, **options):
@@ -38,11 +45,11 @@ class MyBot(commands.Bot):
 
     @tasks.loop(minutes=10)
     async def background_task(self):
-        print('Running background task...')
+        logging.info('Running background task...')  # Remplace print par logging
 
     @staticmethod
     async def on_ready():
-        print('Ready!')
+        logging.info('Ready!')  # Remplace print par logging
 
 
 if __name__ == '__main__':

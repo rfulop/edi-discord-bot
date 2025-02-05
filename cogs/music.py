@@ -1,5 +1,6 @@
 import asyncio
 import itertools
+import logging
 from functools import partial
 
 import discord
@@ -15,6 +16,8 @@ from youtube_search import YoutubeSearch
 from exceptions import VoiceConnectionError, InvalidVoiceChannel
 
 
+logger = logging.getLogger(__name__)
+
 class YTDLChoiceButton(Button):
     def __init__(self, label: int, cog, ctx, url_suffix: str, embed: Embed):
         super().__init__(label=str(label), style=discord.ButtonStyle.primary, custom_id=f'ytdl_choice_btn_{label}')
@@ -24,6 +27,7 @@ class YTDLChoiceButton(Button):
         self.embed = embed
 
     async def callback(self, interaction):
+        logger.info(f"Button {self.label} clicked for URL: {self.url_suffix}")
         await interaction.response.defer()
         url = f'https://www.youtube.com{self.url_suffix}'
         player = self.cog.get_player(self.ctx)
@@ -32,6 +36,7 @@ class YTDLChoiceButton(Button):
         await source.create_source(url, bot=self.cog.bot)
         await self.cog.send_source_embed(self.ctx, source, "Put at the end of the queue 📀")
         await player.queue.put(source)
+        logger.info(f"Added {source.title} to queue.")
 
 
 class YTDL(object):
@@ -71,11 +76,13 @@ class YTDLSource(object):
         self.data = None
 
     async def create_source(self, search, bot):
+        logger.info(f"Creating source for search: {search}")
         try:
             loop = bot.loop or asyncio.get_event_loop()
             to_run = partial(YTDL.youtube_dl.extract_info, url=search, download=False)
             data = await loop.run_in_executor(None, to_run)
         except DownloadError:
+            logger.error(f"DownloadError: Youtube did not accept the request for {search}.")
             raise DownloadError("Youtube did not accept the request. Please retry.")
 
         if 'entries' in data:
@@ -85,6 +92,7 @@ class YTDLSource(object):
         self.url = data.get('url')
         self.webpage_url = data.get('webpage_url')
         self.duration = MusicPlayer.get_str_duration(data.get('duration'))
+        logger.info(f"Source created: {self.title}, {self.url}")
 
 
 class MusicPlayer(object):
@@ -95,6 +103,7 @@ class MusicPlayer(object):
         self.current = None
         self.loop = ctx.bot.loop.create_task(self.player_loop())
         self.display_playing = True
+        logger.info(f"MusicPlayer created for guild {ctx.guild.id}.")
 
     @classmethod
     def get_str_duration(cls, duration):
@@ -112,11 +121,12 @@ class MusicPlayer(object):
 
         while not self.ctx.bot.is_closed():
             self.next.clear()
-
+            logger.info("Waiting for next song to play...")
             try:
                 async with asyncio.timeout(20):
                     source = await self.queue.get()
             except asyncio.TimeoutError:
+                logger.warning(f"Timeout, stopping the player for guild {self.ctx.guild.id}.")
                 return self.destroy(self.ctx.guild)
 
             self.current = source
@@ -135,6 +145,7 @@ class MusicPlayer(object):
             self.current = None
 
     def destroy(self, guild):
+        logger.info(f"Destroying player for guild {guild.id}.")
         return self.ctx.bot.loop.create_task(self.ctx.cog.cleanup(guild))
 
 
@@ -147,20 +158,25 @@ class Music(commands.Cog):
         self.bot = bot
         self.queue = {}
         self.players = {}
+        logger.info("Music cog has been initialized.")
 
     @commands.Cog.listener()
     async def on_ready(self):
-        print('Music cog is ready')
+        logger.info('Music cog is ready')
 
     async def cleanup(self, guild, force=False):
+        logger.info(f"Cleanup initiated for guild {guild.id}, force={force}")
         if guild.voice_client:
             await guild.voice_client.disconnect(force=force)
+            logger.info(f"Disconnected from voice channel in guild {guild.id}")
         if guild.id in self.players.keys():
             self.players[guild.id].loop.cancel()
             del self.players[guild.id]
+            logger.info(f"Cleanup completed for guild {guild.id}.")
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error: Exception) -> None:
+        logger.error(f"Error in command {ctx.command}: {error}")
         if isinstance(error, commands.CommandNotFound):
             await self.send_error_embed(ctx, f"{error}. Please call `!help` to see available commands.")
         elif isinstance(error, commands.MissingPermissions):
@@ -169,7 +185,7 @@ class Music(commands.Cog):
             try:
                 await self.send_error_embed(ctx, "This command cannot be used in Private Messages.")
             except discord.HTTPException as e:
-                print(f"HTTPException while sending error embed: {e}")
+                logger.error(f"HTTPException while sending error embed: {e}")
         elif isinstance(error, InvalidVoiceChannel):
             await self.send_error_embed(ctx, str(error))
         elif isinstance(error, commands.CommandInvokeError):
@@ -183,26 +199,23 @@ class Music(commands.Cog):
 
     @staticmethod
     async def get_source_string(source):
-        return ' | '.join([
-            f'[{source.title}]({source.webpage_url})',
-            f'`{source.duration}`',
-            f'`Requested by:` {source.requester.mention}'
-        ])
+        return ' | '.join([f'[{source.title}]({source.webpage_url})',
+                           f'`{source.duration}`', f'`Requested by:` {source.requester.mention}'])
 
     @staticmethod
     async def get_found_source_string(song, pos):
-        return ' | '.join([
-            f'`{pos}.` [{song["title"]}](https://youtube.com{song["url_suffix"]})',
-            f'`{song["duration"]}`'
-        ])
+        return ' | '.join([f'`{pos}.` [{song["title"]}](https://youtube.com{song["url_suffix"]})',
+                           f'`{song["duration"]}`'])
 
     async def send_source_embed(self, ctx, source, embed_title):
+        logger.info(f"Sending source embed for {embed_title}.")
         embed = discord.Embed(description=await self.get_source_string(source), color=discord.Color.greyple())
         embed.set_author(icon_url=self.bot.user.display_avatar, name=embed_title)
         embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
     async def send_error_embed(self, ctx, error):
+        logger.error(f"Sending error embed: {error}")
         embed = discord.Embed(description=error, color=discord.Color.dark_red())
         embed.set_author(icon_url=self.bot.user.display_avatar, name="Something happened 😟")
         embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
@@ -214,15 +227,18 @@ class Music(commands.Cog):
         except KeyError:
             player = MusicPlayer(ctx)
             self.players[ctx.guild.id] = player
+            logger.info(f"Created new player for guild {ctx.guild.id}")
         return player
 
     async def get_voice_client(self, ctx):
         vc = ctx.voice_client
         if not vc or not vc.is_connected():
             await self.send_error_embed(ctx, self.NOT_CONNECTED_MESSAGE)
+            logger.warning(f"Bot is not connected to a voice channel in guild {ctx.guild.id}.")
         return vc
 
     async def list_choices(self, ctx, search):
+        logger.info(f"Listing choices for search: {search}")
         results = YoutubeSearch(search, max_results=5).to_dict()
 
         fmt = '\n'.join([await self.get_found_source_string(song, i+1) for i, song in enumerate(results)])
@@ -236,6 +252,8 @@ class Music(commands.Cog):
             view.add_item(btn)
 
         await ctx.send(embed=embed, view=view)
+        logger.info(f"Sent search results for: {search}")
+
 
     @commands.hybrid_command(name='loop', with_app_command=True, aliases=['lp', 'repeat'],
                              brief='Loop sur le morceau en cours',
@@ -243,6 +261,7 @@ class Music(commands.Cog):
     @app_commands.describe(rep='Nombre de répétitions')
     @app_commands.guild_only()
     async def loop(self, ctx, rep: int):
+        logger.info(f"Loop command invoked with {rep} repetitions.")
         if not ctx.interaction:
             await ctx.message.delete()
 
@@ -263,6 +282,7 @@ class Music(commands.Cog):
             source = YTDLSource(ctx.author)
             await source.create_source(player.current.webpage_url, bot=self.bot)
             await player.queue.put(source)
+        logger.info(f"Track set to loop for {rep} repetitions.")
 
     @commands.hybrid_command(name='play', with_app_command=True, aliases=['search', 'pl'],
                              brief="Lance ou met en queue un morceau",
@@ -270,6 +290,7 @@ class Music(commands.Cog):
     @app_commands.describe(search='Une url youtube ou des mots-clés')
     @app_commands.guild_only()
     async def play(self, ctx, search):
+        logger.info(f"Play command invoked with search: {search}")
         if ctx.message and not ctx.interaction:
             await ctx.message.delete()
 
@@ -286,6 +307,7 @@ class Music(commands.Cog):
             await source.create_source(search, bot=self.bot)
             await self.send_source_embed(ctx, source, "Put at the end of the queue 📀")
             await player.queue.put(source)
+            logger.info(f"Added URL to queue: {search}")
         else:
             if not all(c.isalnum() or c.isspace() for c in search):
                 return await self.send_error_embed(ctx, "The search you request contains unauthorized characters."
@@ -296,6 +318,7 @@ class Music(commands.Cog):
                              brief="Met le morceau en cours en pause", description="Met le morceau en cours en pause.")
     @app_commands.guild_only()
     async def pause(self, ctx):
+        logger.info("Pause command invoked.")
         if not ctx.interaction:
             await ctx.message.delete()
         vc = ctx.voice_client
@@ -308,11 +331,13 @@ class Music(commands.Cog):
         vc.pause()
         player = self.get_player(ctx)
         await self.send_source_embed(ctx, player.current, embed_title="Paused ⏸")
+        logger.info(f"Paused current track: {player.current.title}")
 
     @commands.hybrid_command(name='resume', with_app_command=True, aliases=['replay', 'r'],
                              brief="Relance le morceau mis en pause", description="Relance le morceau mis en pause.")
     @app_commands.guild_only()
     async def resume(self, ctx):
+        logger.info("Resume command invoked.")
         if not ctx.interaction:
             await ctx.message.delete()
         vc = await self.get_voice_client(ctx)
@@ -322,6 +347,8 @@ class Music(commands.Cog):
         vc.resume()
         player = self.get_player(ctx)
         await self.send_source_embed(ctx, player.current, embed_title="Resuming ⏯")
+        logger.info(f"Resumed track: {player.current.title}")
+
 
     @commands.hybrid_command(name='queue', with_app_command=True, aliases=['q', 'playlist'],
                              brief="Affiche les morceaux contenus dans la liste",
@@ -329,10 +356,12 @@ class Music(commands.Cog):
                                          "de succession.")
     @app_commands.guild_only()
     async def queue_info(self, ctx):
+        logger.info(f"Queue command invoked in guild {ctx.guild.id}")
         if not ctx.interaction:
             await ctx.message.delete()
         vc = await self.get_voice_client(ctx)
         if not vc:
+            logger.warning(f"Bot is not connected to a voice channel in guild {ctx.guild.id}.")
             return
         player = self.get_player(ctx)
         if player.queue.empty() and not vc.is_playing():
@@ -361,15 +390,18 @@ class Music(commands.Cog):
         embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
 
         await ctx.send(embed=embed)
+        logger.info(f"Queue information sent for guild {ctx.guild.id}.")
 
     @commands.hybrid_command(name='np', with_app_command=True, aliases=['song', 'current', 'playing'],
                              brief="Affiche le morceau en cours", description="Affiche le morceau en cours.")
     @app_commands.guild_only()
     async def now_playing(self, ctx):
+        logger.info(f"Now Playing command invoked in guild {ctx.guild.id}")
         if ctx.message and not ctx.interaction:
             await ctx.message.delete()
         vc = await self.get_voice_client(ctx)
         if not vc:
+            logger.warning(f"Bot is not connected to a voice channel in guild {ctx.guild.id}.")
             return
 
         player = self.get_player(ctx)
@@ -377,6 +409,7 @@ class Music(commands.Cog):
             return await self.send_error_embed(ctx, self.NOT_PLAYING_MESSAGE)
 
         await self.send_source_embed(ctx, player.current, embed_title="Now Playing 🎶")
+        logger.info(f"Now playing: {player.current.title} in guild {ctx.guild.id}")
 
     @commands.hybrid_command(name='skip', with_app_command=True, aliases=['next', 'pass', 's'],
                              brief="Passer au prochain morceau",
@@ -385,6 +418,7 @@ class Music(commands.Cog):
     @app_commands.describe(go_to="Passer jusqu'au morceau x")
     @app_commands.guild_only()
     async def skip(self, ctx, go_to: int = 1):
+        logger.info(f"Skip command invoked with go_to={go_to} in guild {ctx.guild.id}")
         if not ctx.interaction:
             await ctx.message.delete()
 
@@ -398,12 +432,14 @@ class Music(commands.Cog):
         for _ in range(go_to):
             vc = await self.get_voice_client(ctx)
             if not vc:
+                logger.warning(f"Bot is not connected to a voice channel in guild {ctx.guild.id}.")
                 return
             elif not vc.is_playing():
                 return
 
             if skipped_url != player.current.webpage_url:
                 await self.send_source_embed(ctx, player.current, embed_title="Skipping ⏭")
+                logger.info(f"Skipping track: {player.current.title} in guild {ctx.guild.id}")
             skipped_url = player.current.webpage_url
             vc.stop()
             await asyncio.sleep(0.1)
@@ -417,6 +453,7 @@ class Music(commands.Cog):
                                   "l'utilisateur se trouve")
     @app_commands.guild_only()
     async def connect(self, ctx, channel: discord.VoiceChannel = None):
+        logger.info(f"Join command invoked in guild {ctx.guild.id}")
         if ctx.command.name != 'join' and not ctx.interaction:
             await ctx.message.delete()
         if not channel:
@@ -428,15 +465,20 @@ class Music(commands.Cog):
         vc = ctx.voice_client
         if vc:
             if vc.channel.id == channel.id:
+                logger.info(f"Bot is already in the correct channel: {channel.name} in guild {ctx.guild.id}")
                 return
             try:
                 await vc.move_to(channel)
+                logger.info(f"Bot moved to channel: {channel.name} in guild {ctx.guild.id}")
             except asyncio.TimeoutError:
+                logger.error(f"Timeout while moving bot to channel {channel.name} in guild {ctx.guild.id}.")
                 raise VoiceConnectionError(f'Moving to channel: <{channel}> timed out.')
         else:
             try:
                 await channel.connect()
+                logger.info(f"Bot connected to channel: {channel.name} in guild {ctx.guild.id}")
             except asyncio.TimeoutError:
+                logger.error(f"Timeout while connecting bot to channel {channel.name} in guild {ctx.guild.id}.")
                 raise VoiceConnectionError(f'Connecting to channel: <{channel}> timed out.')
 
         await ctx.send(f'**Joined `{channel}`** 🤟')
@@ -446,22 +488,27 @@ class Music(commands.Cog):
                              description="Arrête la musique et quitte le channel vocal. La queue est remise à zéro.")
     @app_commands.guild_only()
     async def leave(self, ctx):
+        logger.info(f"Leave command invoked in guild {ctx.guild.id}")
         if not ctx.interaction:
             await ctx.message.delete()
         vc = await self.get_voice_client(ctx)
         if not vc:
+            logger.warning(f"Bot is not connected to a voice channel in guild {ctx.guild.id}.")
             return
         await ctx.send('**Successfully disconnected** 👋')
 
         await self.cleanup(ctx.guild)
+        logger.info(f"Bot disconnected from voice channel in guild {ctx.guild.id}.")
 
     @play.before_invoke
     async def ensure_voice(self, ctx):
+        logger.info(f"Ensuring voice connection for play command in guild {ctx.guild.id}")
         if ctx.voice_client is None or not ctx.voice_client.is_connected():
             await self.connect(ctx)
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
+        logger.info(f"Voice state update for {member} in guild {member.guild.id}")
         if not after.channel and before.channel and member.guild.id in self.players.keys():
             vc = member.guild.voice_client
             if vc:
@@ -469,6 +516,8 @@ class Music(commands.Cog):
                 if len(members_in_channel) == 0:
                     vc._runner.cancel()
                     await self.cleanup(member.guild, force=True)
+                    logger.info(f"Bot disconnected from voice channel in guild {member.guild.id} because no members are left.")
+
 
 
 async def setup(bot):
