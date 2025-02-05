@@ -176,24 +176,30 @@ class Event(commands.Cog):
         message_id = int(poll_data['message_id'])
 
         guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return
         role = guild.get_role(role_id)
+        if role is None:
+            return
 
         mentions = [member.mention for member in role.members if not member.bot]
         mentions_str = ', '.join(mentions)
 
         event = None
         if date_found:
-            date_str, hour_str, _ = date_found.split(' ')
+            date_str, *hour_parts = date_found.split(' ')
+
+            hour_str = hour_parts[0] if hour_parts else ''
             day, month, year = date_str.split('/')
-            if hour_str == 'Fin':
-                hour = 18
-            elif hour_str == "Soir":
-                hour = 20
-            elif hour_str == "Après-midi":
-                hour = 22
-            else:
-                hour = 20
+            hour_mapping = {
+                'Fin': 18,
+                'Soir': 20,
+                'Après-midi': 22
+            }
+
+            hour = hour_mapping.get(hour_str, 20)
             date = datetime(int(year), int(month), int(day), hour, 0, 0)
+
             guild = role.guild
             message = random.choice(DATE_FOUND_MESSAGES).format(mentions_str, role.mention, date_found)
             event = await self.create_event(guild, role, mentions_str, date)

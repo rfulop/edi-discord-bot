@@ -156,20 +156,24 @@ class Music(commands.Cog):
             del self.players[guild.id]
 
     @commands.Cog.listener()
-    async def on_command_error(self, ctx, error):
+    async def cog_command_error(self, ctx, error: Exception) -> None:
         if isinstance(error, commands.CommandNotFound):
             await self.send_error_embed(ctx, f"{error}. Please call `!help` to see available commands.")
         elif isinstance(error, commands.MissingPermissions):
-            await self.send_error_embed(ctx, "You have not the permission to execute this command.")
+            await self.send_error_embed(ctx, "You do not have the permission to execute this command.")
         elif isinstance(error, commands.NoPrivateMessage):
             try:
-                await self.send_error_embed(ctx, "This command can not be used in Private Messages.")
-            except discord.HTTPException:
-                pass
+                await self.send_error_embed(ctx, "This command cannot be used in Private Messages.")
+            except discord.HTTPException as e:
+                print(f"HTTPException while sending error embed: {e}")
         elif isinstance(error, InvalidVoiceChannel):
-            await self.send_error_embed(ctx, error.__str__())
-        elif isinstance(error, CommandInvokeError):
-            await self.send_error_embed(ctx, error.__str__())
+            await self.send_error_embed(ctx, str(error))
+        elif isinstance(error, commands.CommandInvokeError):
+            original_error = getattr(error, 'original', None)
+            if original_error:
+                await self.send_error_embed(ctx, f"Error occurred: {str(original_error)}")
+            else:
+                await self.send_error_embed(ctx, "An unknown error occurred during command invocation.")
         else:
             await self.send_error_embed(ctx, "Something unexpected happened. Please try again.")
 
@@ -459,8 +463,10 @@ class Music(commands.Cog):
         if not after.channel and before.channel and member.guild.id in self.players.keys():
             vc = member.guild.voice_client
             if vc:
-                vc._runner.cancel()
-            await self.cleanup(member.guild, force=True)
+                members_in_channel = [m for m in after.channel.members if not m.bot]
+                if len(members_in_channel) == 0:
+                    vc._runner.cancel()
+                    await self.cleanup(member.guild, force=True)
 
 
 async def setup(bot):
