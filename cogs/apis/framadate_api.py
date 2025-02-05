@@ -1,9 +1,11 @@
 import csv
+import logging
+from datetime import datetime, timedelta
+from io import StringIO
+
 import aiohttp
 import requests
-from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
-from io import StringIO
 
 
 class FramadateAPI(object):
@@ -15,18 +17,26 @@ class FramadateAPI(object):
     DATE_POLL_ENDPOINT = '/create_date_poll.php'
     EXPORT_ENDPOINT = '/exportcsv.php'
 
+    HTTP_ERROR_MESSAGE = "Une erreur {} s'est produite lors de la requête HTTP à l'URL {}"
+    API_ERROR_MESSAGE = "Une erreur s'est produite lors de l'appel à l'API à l'URL {}: {}"
+
     def __init__(self):
         self.session = requests.Session()
 
-    @staticmethod
-    def _check_response(response):
+    def handle_http_errors(self, response):
         """
-        Gere les erreurs de requete HTTP
-        :param response: Reponse HTTP
+        Gère les erreurs de requête HTTP
+        :param response: Réponse HTTP
         :return:
         """
-        if response.status_code != 200:
+        try:
             response.raise_for_status()
+        except requests.HTTPError as http_err:
+            logging.error(self.HTTP_ERROR_MESSAGE.format(http_err, response.url))
+            raise http_err
+        except Exception as err:
+            logging.error(self.API_ERROR_MESSAGE.format(response.url, err))
+            raise err
 
     @staticmethod
     def generate_schedule(start_date, num_days):
@@ -110,62 +120,67 @@ class FramadateAPI(object):
         selectionne la date avec le moins de votes "si nécessaire".
         :param admin_url: URL de l'administration du sondage
         :param players_count: Nombre de joueurs
-        :return: Dictionnaire contenant les votants n'ayant pas répondu, la date choisie et si tout le monde a répondu
+        :return: Dictionnaire contenant les votants n'ayant pas répondu, la date choisie et si tout le monde a répondu,
+        ou None si une erreur s'est produite
         """
         poll_id = admin_url.split('/')[-2]
         csv_url = f"{self.BASE_URL}/exportcsv.php?admin={poll_id}"
 
         async with aiohttp.ClientSession() as session:
             async with session.get(csv_url) as response:
-                if response.status == 200:
-                    csv_text = await response.text()
-                    f = StringIO(csv_text)
-                    reader = csv.reader(f, delimiter=',')
+                try:
+                    self.handle_http_errors(response)
+                except (requests.HTTPError, requests.RequestException):
+                    return None
 
-                    date_headers = next(reader)[1:]
-                    time_headers = next(reader)[1:]
+                csv_text = await response.text()
+                f = StringIO(csv_text)
+                reader = csv.reader(f, delimiter=',')
 
-                    slots = list(zip(date_headers, time_headers))
-                    slot_yes_responses = {slot: 0 for slot in slots}
-                    slot_if_needed_responses = {slot: 0 for slot in slots}
-                    non_responders = []
+                date_headers = next(reader)[1:]
+                time_headers = next(reader)[1:]
 
-                    for row in reader:
-                        attendee_name = row[0]
-                        responses = row[1:]
-                        is_non_responder = True
+                slots = list(zip(date_headers, time_headers))
+                slot_yes_responses = {slot: 0 for slot in slots}
+                slot_if_needed_responses = {slot: 0 for slot in slots}
+                non_responders = []
 
-                        for i, resp in enumerate(responses, start=1):
-                            formatted_response = resp.strip().lower()
-                            if formatted_response == 'oui':
-                                slot_yes_responses[slots[i - 1]] += 1
-                                is_non_responder = False
-                            elif formatted_response == 'si nécessaire':
-                                slot_if_needed_responses[slots[i - 1]] += 1
-                                is_non_responder = False
+                for row in reader:
+                    attendee_name = row[0]
+                    responses = row[1:]
+                    is_non_responder = True
 
-                        if is_non_responder:
-                            non_responders.append(attendee_name)
+                    for i, resp in enumerate(responses, start=1):
+                        formatted_response = resp.strip().lower()
+                        if formatted_response == 'oui':
+                            slot_yes_responses[slots[i - 1]] += 1
+                            is_non_responder = False
+                        elif formatted_response == 'si nécessaire':
+                            slot_if_needed_responses[slots[i - 1]] += 1
+                            is_non_responder = False
 
-                    f.close()
+                    if is_non_responder:
+                        non_responders.append(attendee_name)
 
-                    date_found = None
-                    max_yes_responses = 0
-                    for slot, yes_count in slot_yes_responses.items():
-                        if_needed_count = slot_if_needed_responses[slot]
-                        total_count = yes_count + if_needed_count
+                f.close()
 
-                        if yes_count > max_yes_responses and total_count == players_count:
-                            date_found = f"{slot[0]} {slot[1]}"
-                            max_yes_responses = yes_count
+                date_found = None
+                max_yes_responses = 0
+                for slot, yes_count in slot_yes_responses.items():
+                    if_needed_count = slot_if_needed_responses[slot]
+                    total_count = yes_count + if_needed_count
 
-                    all_responded = not non_responders
+                    if yes_count > max_yes_responses and total_count == players_count:
+                        date_found = f"{slot[0]} {slot[1]}"
+                        max_yes_responses = yes_count
 
-                    return {
-                        "non_responders": non_responders,
-                        "date_found": date_found,
-                        "all_responded": all_responded
-                    }
+                all_responded = not non_responders
+
+                return {
+                    "non_responders": non_responders,
+                    "date_found": date_found,
+                    "all_responded": all_responded
+                }
 
     def initiate_poll(self, poll_author, poll_type='date', lang='fr', title='', description='', email=''):
         """
@@ -176,7 +191,7 @@ class FramadateAPI(object):
         :param title: Titre du sondage
         :param description: Description du sondage
         :param email: Email de l'auteur
-        :return:
+        :return: True si le sondage a ete initialise avec succes, False sinon
         """
         params = {'type': poll_type, 'lang': lang}
         data = {
@@ -193,26 +208,37 @@ class FramadateAPI(object):
             'gotostep2': poll_type,
         }
         response = self.session.post(self.BASE_URL + self.CREATION_ENDPOINT, params=params, data=data)
-        self._check_response(response)
+        try:
+            self.handle_http_errors(response)
+        except (requests.HTTPError, requests.RequestException):
+            return False
+        return True
 
     def set_poll_dates(self, date_entries):
         """
         Ajoute les dates au sondage. Seconde etape de la creation du sondage
         :param date_entries: Liste des dates au format dd/mm/yyyy
-        :return:
+        :return: True si les dates ont ete ajoutees avec succes, False sinon
         """
         response = self.session.post(self.BASE_URL + self.DATE_POLL_ENDPOINT, data=date_entries)
-        self._check_response(response)
+        try:
+            self.handle_http_errors(response)
+        except (requests.HTTPError, requests.RequestException):
+            return False
+        return True
 
     def confirm_poll(self, end_date):
         """
         Confirme le sondage et retourne la page d'administration. Troisieme etape de la creation du sondage
         :param end_date: Date de fin du sondage au format dd/mm/yyyy
-        :return: Page d'administration du sondage
+        :return: Page d'administration du sondage si le sondage a ete confirme avec succes, None sinon
         """
         data = {'enddate': end_date, 'confirmation': 'confirmation'}
         response = self.session.post(self.BASE_URL + self.DATE_POLL_ENDPOINT, data=data)
-        self._check_response(response)
+        try:
+            self.handle_http_errors(response)
+        except (requests.HTTPError, requests.RequestException):
+            return None
         return response
 
     def create_date_poll(self, poll_author, title, description, email, start_date, num_days, end_date):
@@ -227,10 +253,17 @@ class FramadateAPI(object):
         :param end_date: Date de fin du sondage au format dd/mm/yyyy
         :return: Dictionnaire contenant les informations du sondage
         """
-        self.initiate_poll(poll_author=poll_author, title=title, description=description, email=email)
+        is_poll_initiated = self.initiate_poll(poll_author=poll_author, title=title,
+                                               description=description, email=email)
+        if not is_poll_initiated:
+            return None
         date_entries = self.generate_schedule(start_date, num_days)
-        self.set_poll_dates(date_entries)
+        is_dates_set = self.set_poll_dates(date_entries)
+        if not is_dates_set:
+            return None
         response = self.confirm_poll(end_date)
+        if not response:
+            return None
         admin_url = response.url
         html = response.content
         public_url = self.get_public_poll_link(html)
@@ -243,4 +276,3 @@ class FramadateAPI(object):
             'control_token': control_token,
             'expire_at': end_date
         }
-

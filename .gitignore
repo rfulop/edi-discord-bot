@@ -1,5 +1,6 @@
 # Private files
 cogs/temp/polls.json
+nohup.out
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
