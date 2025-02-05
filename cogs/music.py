@@ -160,7 +160,7 @@ class Music(commands.Cog):
             del self.players[guild.id]
 
     @commands.Cog.listener()
-    async def cog_command_error(self, ctx, error: Exception) -> None:
+    async def on_command_error(self, ctx, error: Exception) -> None:
         if isinstance(error, commands.CommandNotFound):
             await self.send_error_embed(ctx, f"{error}. Please call `!help` to see available commands.")
         elif isinstance(error, commands.MissingPermissions):
