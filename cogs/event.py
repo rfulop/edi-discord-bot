@@ -224,7 +224,7 @@ class Event(commands.Cog):
             hour_mapping = {
                 'Fin': 18,
                 'Soir': 20,
-                'Après-midi': 22
+                'Après-midi': 14
             }
 
             hour = hour_mapping.get(hour_str, 20)
