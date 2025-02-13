@@ -101,6 +101,7 @@ class Event(commands.Cog):
         poll_data['created_at'] = (datetime.now(tz=pytz.timezone(self.TIMEZONE_STR))
                                    .strftime(self.EXTENDED_POLL_DATE_FORMAT))
         poll_data['last_reminder_sent'] = now
+        poll_data['poll_name'] = formatted_poll_name
 
         polls_data[formatted_poll_name] = poll_data
         self.write_polls_data(polls_data)
