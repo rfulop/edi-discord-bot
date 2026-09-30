@@ -12,15 +12,12 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands, EntityType, Role, ScheduledEvent, MessageType, Guild, TextChannel
 
-from main import GUILD_ID, VOICE_CHANNEL_ID, APP_ID
+from config import settings
 from cogs.apis.framadate_api import FramadateAPI
 from cogs.bot_responses.messages import ADMIN_MESSAGES, PC_MESSAGES, REMINDER_MESSAGES_1, REMINDER_MESSAGES_2, \
     REMINDER_MESSAGES_3, REMINDER_MESSAGES_4, DATE_FOUND_MESSAGES, DATE_NOT_FOUND_MESSAGES, FAILED_POLL_MESSAGES, \
     EVENT_CREATED_MESSAGE, CALL_TO_VOTE_MESSAGE
 from cogs.bot_responses.poll_img import poll_images
-
-
-logger = logging.getLogger(__name__)
 
 
 class Event(commands.Cog):
@@ -42,11 +39,11 @@ class Event(commands.Cog):
         self.loop = asyncio.create_task(self.update_embed_task())
         self.framadate = FramadateAPI()
         self.poll_check_loop.start()
-        logger.info("Event cog initialized.")
 
     def cog_unload(self):
         self.poll_check_loop.cancel()
-        logger.info("Event cog unloaded.")
+        self.find_polls.cancel()
+        self.loop.cancel()
 
     @tasks.loop(minutes=CHECK_VOTERS_INTERVAL)
     async def poll_check_loop(self):
@@ -54,15 +51,17 @@ class Event(commands.Cog):
         Tâche asynchrone vérifiant si tous les votants ont voté pour un sondage.
         :return:
         """
-        logger.info("Poll check loop triggered.")
         await self.check_voters()
+
+    @poll_check_loop.before_loop
+    async def before_poll_check(self):
+        await self.bot.wait_until_ready()
 
     def load_or_initialize_polls(self):
         """
         Charge les informations des sondages depuis le fichier de suivi.
         :return:
         """
-        logger.info("Loading or initializing polls.")
         if not os.path.exists(self.POLLS_PATH):
             with open(self.POLLS_PATH, 'w') as file:
                 json.dump({}, file)
@@ -72,7 +71,6 @@ class Event(commands.Cog):
             try:
                 return json.load(file)
             except json.JSONDecodeError:
-                logger.error("Failed to load polls data, returning empty.")
                 return {}
 
     def write_polls_data(self, polls_data):
@@ -81,7 +79,6 @@ class Event(commands.Cog):
         :param polls_data: Dictionnaire contenant les informations des sondages
         :return:
         """
-        logger.info("Writing polls data to file.")
         with open(self.POLLS_PATH, 'w') as file:
             json.dump(polls_data, file, indent=4)
 
@@ -92,7 +89,6 @@ class Event(commands.Cog):
         :param poll_data: Dictionnaire contenant les informations du sondage
         :return:
         """
-        logger.info(f"Saving poll info for {poll_name}.")
         now = datetime.now(tz=pytz.timezone(self.TIMEZONE_STR)).strftime(self.EXTENDED_POLL_DATE_FORMAT)
         formatted_poll_name = f'{poll_name} - {now}'
 
@@ -115,7 +111,6 @@ class Event(commands.Cog):
         :param jump_url: URL du sondage
         :return: Message de rappel
         """
-        logger.info(f"Choosing reminder message for {member.display_name} with reminder count {reminder_count}.")
         if reminder_count == 0 or reminder_count == 1:
             reminder_message = random.choice(REMINDER_MESSAGES_1)
         elif reminder_count == 2:
@@ -133,10 +128,8 @@ class Event(commands.Cog):
         :param poll_info: Dictionnaire contenant les informations du sondage
         :return:
         """
-        logger.info(f"Sending reminders for poll {poll_info['poll_name']}.")
         guild = self.bot.get_guild(poll_info['guild_id'])
         if not guild:
-            logger.warning(f"Guild {poll_info['guild_id']} not found.")
             return None
         role = guild.get_role(int(poll_info['role_id']))
         if role:
@@ -150,9 +143,8 @@ class Event(commands.Cog):
                         message = self.choose_reminder_message(poll_info['reminder_count'],
                                                                member, poll_info['jump_url'])
                         await member.send(message)
-                        logger.info(f"Reminder sent to {member.display_name} for poll {poll_info['poll_name']}.")
                     except discord.HTTPException as e:
-                        logger.error(f"Failed to send reminder to {member.display_name}: {e}")
+                        print(f"Erreur lors de l'envoi d'un rappel à {member.display_name}: {e}")
 
     async def should_send_reminder(self, poll_info):
         """
@@ -160,7 +152,6 @@ class Event(commands.Cog):
         :param poll_info: Dictionnaire contenant les informations du sondage
         :return: Booléen indiquant si un rappel doit être envoyé
         """
-        logger.info(f"Checking if reminder should be sent for poll {poll_info['poll_name']}.")
         if poll_info['send_reminders'] == 'False':
             return False
 
@@ -180,7 +171,6 @@ class Event(commands.Cog):
         :param poll_name: Nom du sondage (index du dictionnaire)
         :return:
         """
-        logger.info(f"Removing poll {poll_name} from tracking.")
         with open(self.POLLS_PATH, 'r+') as file:
             polls = json.load(file)
             if poll_name in polls:
@@ -197,7 +187,6 @@ class Event(commands.Cog):
         :param date_found: Date trouvée par le sondage
         :return:
         """
-        logger.info(f"Finalizing poll {poll_data['poll_name']} and notifying.")
         guild_id = poll_data['guild_id']
         channel_id = poll_data['channel_id']
         role_id = int(poll_data['role_id'])
@@ -205,11 +194,11 @@ class Event(commands.Cog):
 
         guild = self.bot.get_guild(guild_id)
         if guild is None:
-            logger.warning(f"Guild {guild_id} not found.")
+            logging.getLogger(__name__).warning("Guild %s no longer available", guild_id)
             return
         role = guild.get_role(role_id)
         if role is None:
-            logger.warning(f"Role {role_id} not found.")
+            logging.getLogger(__name__).warning("Role %s no longer available", role_id)
             return
 
         mentions = [member.mention for member in role.members if not member.bot]
@@ -217,19 +206,20 @@ class Event(commands.Cog):
 
         event = None
         if date_found:
-            date_str, *hour_parts = date_found.split(' ')
-
-            hour_str = hour_parts[0] if hour_parts else ''
+            date_parts = date_found.split(' ')
+            date_str = date_parts[0]
+            hour_str = date_parts[1]
             day, month, year = date_str.split('/')
-            hour_mapping = {
-                'Fin': 18,
-                'Soir': 20,
-                'Après-midi': 14
-            }
-
-            hour = hour_mapping.get(hour_str, 20)
+            if hour_str == 'Fin':
+                hour = 18
+            elif hour_str == "Soir":
+                hour = 20
+            elif hour_str == "Après-midi":
+                hour = 14
+            else:
+                hour = 20
             date = datetime(int(year), int(month), int(day), hour, 0, 0)
-            date = date.replace(tzinfo=pytz.timezone(self.TIMEZONE_STR))
+            date = pytz.timezone(self.TIMEZONE_STR).localize(date)
             guild = role.guild
             message = random.choice(DATE_FOUND_MESSAGES).format(mentions_str, role.mention, date_found)
             event = await self.create_event(guild, role, mentions_str, date)
@@ -246,10 +236,16 @@ class Event(commands.Cog):
                 if date_found and event:
                     await channel.send(event.url)
             except discord.HTTPException as e:
-                logger.error(f"Failed to send message in channel {channel.name}: {e}")
+                print(f"Erreur lors de l'envoi d'un message dans le canal {channel.name}: {e}")
 
     async def notify_all_responded_date_not_found(self, poll_data):
-        logger.info(f"Checking for notification for poll {poll_data['poll_name']}.")
+        """
+        Si tous les votants ont voté pour un sondage mais qu'aucune date commune n'a été trouvée, envoie un message de
+        notification. Un message est envoyé dans le channel toutes les 24 heures maximum.
+        Ne supprime pas le sondage du fichier de suivi et du channel.
+        :param poll_data: Dictionnaire contenant les informations du sondage
+        :return: Si une notification a été envoyée, retourne la date de la dernière notification, sinon retourne None
+        """
         last_channel_notification = poll_data.get('last_channel_notification')
         if last_channel_notification:
             last_notification_date = datetime.strptime(last_channel_notification, self.EXTENDED_POLL_DATE_FORMAT)
@@ -273,16 +269,18 @@ class Event(commands.Cog):
                     await channel.send(message)
                     poll_data['last_channel_notification'] = (datetime.now(tz=pytz.timezone(self.TIMEZONE_STR))
                                                               .strftime(self.EXTENDED_POLL_DATE_FORMAT))
-                    logger.info(f"Notification sent for poll {poll_data['poll_name']} to channel {channel.name}.")
                 except discord.HTTPException as e:
-                    logger.error(f"Error sending message to channel {channel.name}: {e}")
+                    print(f"Erreur lors de l'envoi d'un message dans le canal {channel.name}: {e}")
 
             return datetime.now(tz=pytz.timezone(self.TIMEZONE_STR)).strftime(self.EXTENDED_POLL_DATE_FORMAT)
-        logger.info(f"No notification sent for poll {poll_data['poll_name']}, last notification too recent.")
         return None
 
     async def check_voters(self):
-        logger.info("Checking voters for all polls.")
+        """
+        Vérifie si tous les votants ont voté pour un sondage. Si non, envoie un rappel. Si oui, envoie un message de
+        clôture du sondage.
+        :return:
+        """
         with open(self.POLLS_PATH, 'r+') as file:
             polls_data = json.load(file)
             current_date = datetime.now(tz=pytz.timezone(self.TIMEZONE_STR))
@@ -301,9 +299,7 @@ class Event(commands.Cog):
                 else:
                     check_data = await self.framadate.analyze_csv(poll_info['admin_url'], poll_info['players_count'])
                     if not check_data:
-                        logger.warning(f"No check data for poll {poll_name}, skipping.")
                         continue
-
                     non_responders = check_data['non_responders']
                     date_found = check_data['date_found']
                     all_responded = check_data['all_responded']
@@ -319,7 +315,6 @@ class Event(commands.Cog):
                                 polls_data[poll_name]['last_channel_notification'] = notification_sent
                                 to_update = True
                     elif await self.should_send_reminder(polls_data.get(poll_name)):
-                        logger.info(f"Sending reminder for poll {poll_name}.")
                         await self.send_reminders_date_poll(non_responders, poll_info)
                         new_reminder_count = poll_info['reminder_count'] + 1
                         polls_data.get(poll_name)['last_reminder_sent'] = datetime.now(
@@ -329,14 +324,12 @@ class Event(commands.Cog):
 
             if to_update:
                 for poll_name in expired_polls:
-                    logger.info(f"Removing expired poll {poll_name}.")
                     del polls_data[poll_name]
                 file.seek(0)
                 file.truncate()
                 json.dump(polls_data, file, indent=4)
 
     async def send_reminders(self, poll, users):
-        logger.info(f"Sending reminders for poll {poll.id}.")
         link = poll.jump_url
         match = re.search(self.SESSION_SEARCH_REGEX, poll.embeds[0].title)
         role = match.group(1)
@@ -352,7 +345,6 @@ class Event(commands.Cog):
             await dm_channel.send(f"N'oublie pas de participer au sondage pour la prochaine session de {role}: {link}")
 
     async def get_voters(self, msg):
-        logger.info(f"Getting voters for poll {msg.id}.")
         reactions = [reaction for reaction in msg.reactions if reaction.emoji in self.NB_EMOJIS]
         voters = []
         for r in reactions:
@@ -360,7 +352,6 @@ class Event(commands.Cog):
         return list(set(voters))
 
     async def find_alerts(self, channel, poll, not_voters):
-        logger.info(f"Searching for alerts related to poll {poll.id}.")
         alert_send = False
         poll_date = poll.created_at
         now = datetime.now(tz=pytz.timezone(self.TIMEZONE_STR))
@@ -380,11 +371,12 @@ class Event(commands.Cog):
 
     @tasks.loop(minutes=60)
     async def find_polls(self):
-        logger.info("Finding polls to check.")
-        guild = self.bot.get_guild(int(GUILD_ID))
+        guild = self.bot.get_guild(settings.guild_id)
+        if guild is None:
+            return
         for channel in guild.text_channels:
             async for msg in channel.history(limit=1000):
-                if msg.author.bot and msg.author.id == int(APP_ID):
+                if msg.author.bot and msg.author.id == settings.application_id:
                     if msg.embeds and msg.embeds[0].title:
                         embed = msg.embeds[0]
                         match = re.search(self.SESSION_SEARCH_REGEX, embed.title)
@@ -399,15 +391,19 @@ class Event(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        logger.info("Event cog is ready")
-        await self.find_polls.start()
+        print('Event cog is ready')
+        if not self.find_polls.is_running():
+            self.find_polls.start()
 
     async def create_event(self, guild: Guild, role: Role, users: str, date: datetime) -> ScheduledEvent:
-        logger.info(f"Creating event for role {role} on {date}.")
 
         current_time = datetime.now(tz=pytz.timezone(self.TIMEZONE_STR))
         current_time_adjusted = current_time + timedelta(minutes=30)
-        event_start = date.replace(hour=20, minute=0, second=0).astimezone(pytz.timezone(self.TIMEZONE_STR))
+        # Legacy /pick supplies only a date; Framadate supplies a time as well.
+        event_start = date
+        if event_start.hour == 0 and event_start.minute == 0:
+            event_start = event_start.replace(hour=20)
+        event_start = event_start.astimezone(pytz.timezone(self.TIMEZONE_STR))
         if event_start < current_time_adjusted:
             event_start = current_time_adjusted
         event_end = date.replace(hour=23, minute=59, second=0).astimezone(pytz.timezone(self.TIMEZONE_STR))
@@ -415,15 +411,12 @@ class Event(commands.Cog):
             event_end = current_time_adjusted
 
         img_path = os.path.join('.', 'img', 'tavern.png')
-        channel = self.bot.get_channel(int(VOICE_CHANNEL_ID))
+        channel = self.bot.get_channel(settings.voice_channel_id)
 
         description = random.choice(EVENT_CREATED_MESSAGE)
         with open(img_path, 'rb') as img:
             f = img.read()
             img_bytes = bytearray(f)
-
-        logger.info(f"Scheduled event for {role} at {event_start} to {event_end}.")
-
         event = await guild.create_scheduled_event(
             name=f"Session {role}",
             description=description.format(users, role.mention),
@@ -434,19 +427,16 @@ class Event(commands.Cog):
             image=img_bytes,
             privacy_level=discord.PrivacyLevel.guild_only,
         )
-        logger.info(f"Event created: {event.name} at {event.start_time}.")
         return event
 
     @staticmethod
     async def send_message(channel: TextChannel, event_url: str, role: Role, users: str):
-        logger.info(f"Sending event notification to channel {channel.name}.")
         await channel.send(f"{users}, vous avez trouvé une date commune pour la prochaine session de {role.mention} "
                            f"🥳 !\nUn evenement a été créé ⬇️.\n(MJ, tu peux modifier l'heure.)")
         await channel.send(event_url)
 
     @staticmethod
     async def check_embed_message(message):
-        logger.info(f"Checking embed message for poll {message.id}.")
         if message.embeds:
             embed = message.embeds[0]
             if message.author.bot and embed.title.startswith('Quelles dispos pour la prochaine session de'):
@@ -454,7 +444,6 @@ class Event(commands.Cog):
         return False
 
     async def update_embed_task(self):
-        logger.info("Starting update embed task.")
         while True:
             try:
                 update = self.queue.get(block=False)
@@ -466,7 +455,6 @@ class Event(commands.Cog):
             self.queue.task_done()
 
     async def reaction_callback(self, payload):
-        logger.info(f"Handling reaction callback for message {payload.message_id} by user {payload.user_id}.")
         user = self.bot.get_user(payload.user_id)
         if user != self.bot.user and payload.emoji.name in self.NB_EMOJIS:
             channel = self.bot.get_channel(payload.channel_id)
@@ -495,7 +483,6 @@ class Event(commands.Cog):
                     date_found = field.name
 
             if date_found:
-                logger.info(f"Date found: {date_found}")
                 date = datetime.strptime(date_found.split('- ')[1], '%A %d %B %Y')
                 date = date.replace(tzinfo=pytz.timezone(self.TIMEZONE_STR))
                 match = re.search(self.SESSION_SEARCH_REGEX, embed.title)
@@ -509,35 +496,36 @@ class Event(commands.Cog):
                 await message.delete()
 
             else:
-                logger.info(f"Date not found, updating message.")
                 await message.edit(embed=embed)
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
-        logger.info(f"Reaction added: {payload.emoji.name} by {payload.user_id}.")
         self.queue.put(payload)
 
     @commands.Cog.listener()
     async def on_raw_reaction_remove(self, payload):
-        logger.info(f"Reaction removed: {payload.emoji.name} by {payload.user_id}.")
         self.queue.put(payload)
 
     async def cog_command_error(self, ctx, error: Exception) -> None:
-        logger.error(f"Error occurred in command {ctx.command}: {error}")
+        original = getattr(error, 'original', error)
+        logging.getLogger(__name__).error(
+            "Unhandled legacy event command error", exc_info=original
+        )
         try:
-            await ctx.reply(str(error), ephemeral=True)
+            await ctx.reply(
+                "Une erreur inattendue s'est produite. Elle a été enregistrée.",
+                ephemeral=bool(ctx.interaction),
+            )
         except (discord.errors.NotFound, discord.errors.HTTPException):
             pass
 
     async def send_error_embed(self, ctx, error):
-        logger.error(f"Sending error embed: {error}")
         embed = discord.Embed(description=error, color=discord.Color.dark_red())
         embed.set_author(icon_url=self.bot.user.display_avatar, name="Something happened 😟")
         embed.set_footer(text=f"{ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
     async def add_players_to_poll(self, poll_result, players):
-        logger.info(f"Adding players to poll {poll_result['admin_url']}.")
         choices = {}
         for i in range(poll_result['choices_count']):
             choices[f'choices[{i}]'] = ' '
@@ -553,7 +541,6 @@ class Event(commands.Cog):
     @app_commands.describe(reminders="Si True, le bot envoie des rappels toutes les 24h aux joueurs n'ayant pas votés")
     @app_commands.guild_only()
     async def pick(self, ctx, role: discord.Role, days: int = 7, delay: int = 0, reminders: bool = True):
-        logger.info(f"Creating pick poll for role {role.name} with {days} days and {delay} days delay.")
         poll_author = ctx.author.display_name
         resp_message = await ctx.send(f"Bien reçu {poll_author}, je crée ton sondage pour la table {role.mention} !")
         now = datetime.now(tz=pytz.timezone(self.TIMEZONE_STR))
@@ -595,7 +582,8 @@ class Event(commands.Cog):
     @app_commands.describe(reminders="Si True, le bot envoie des rappels toutes les 24h aux joueurs n'ayant pas votés")
     @app_commands.guild_only()
     async def date_poll(self, ctx, role: discord.Role, days: int = 7, delay: int = 0, reminders: bool = True):
-        logger.info(f"Creating date poll for role {role.name} with {days} days and {delay} days delay.")
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(thinking=True)
         poll_author = ctx.author.display_name
         email = "jenaipas@de.email"
         start_date = (datetime.now(tz=pytz.timezone(self.TIMEZONE_STR)) +
@@ -608,14 +596,15 @@ class Event(commands.Cog):
         players = [member.display_name for member in role.members if not member.bot]
         title = f'Session pour la table {role}'
 
-        poll_result = self.framadate.create_date_poll(
+        poll_result = await asyncio.to_thread(
+            self.framadate.create_date_poll,
             poll_author=poll_author,
             title=title,
             description=f"Quelles sont vos dispos pour la prochaine session de {role} ? 🎲",
             email=email,
             start_date=start_date,
             num_days=days,
-            end_date=end_date
+            end_date=end_date,
         )
         if not poll_result:
             return await self.send_error_embed(ctx, "Impossible de créer le sondage.")

@@ -10,17 +10,17 @@ Features
 --------
 
 *   **Music**: Full control over a music queue with commands for playing, pausing, resuming, and skipping tracks.
-*   **Event**: Creates polls to determine meeting dates and manages related events using two methods: through Discord with `pick`, and through the Framadate website with `date`, with the latter being recommended.
+*   **Calendar**: Collects and updates player availability directly in Discord with `schedule`, while the previous `date` and `pick` commands remain available during the transition.
 *   **Utils**: Various utility tools for managing the bot and messages on the server.
 *   **Language**: All messages sent by the bot are exclusively in French.
 
 Commands
 --------
 
-Commands can be used through the traditional prefix `!` or as slash commands.
-Most commands have parameters that can be viewed and used via slash commands, providing clear and interactive usage options.
+Commands use Discord's slash-command interface.
 
 *   **Event**
+    *   `schedule`: Creates an editable availability calendar directly in Discord, with daily reminders for players who have not answered. The game master selects the voice channel when finalizing the event.
     *   `date`: Creates a poll on the Framadate website for scheduling.
     *   `pick`: Creates a poll directly on Discord proposing multiple dates.
 *   **Music**
@@ -34,8 +34,8 @@ Most commands have parameters that can be viewed and used via slash commands, pr
     *   `resume`: Resumes a paused track.
     *   `skip`: Skips to the next track.
 *   **Utils**
-    *   `delete_edi_messages`: Deletes Edi's messages.
-    *   `sync`: Synchronizes the commands for the guild.
+    *   `help`: Displays the available commands.
+    *   `cleanup`: Deletes Edi's recent messages from the current channel. Requires Manage Messages.
 
 Prerequisites
 -------------
@@ -64,6 +64,8 @@ Prerequisites for the Music Cog
 
 The Music cog of **Edi Discord Bot** requires [FFmpeg](https://ffmpeg.org/) to be installed on the system where the bot is running. FFmpeg is used to process audio streams, which is essential for the music playback functionality.
 
+Recent versions of yt-dlp also require a JavaScript runtime to solve YouTube playback challenges. Install either [Deno](https://deno.com/) 2.3 or newer (recommended), or Node.js 22 or newer. The bot automatically prefers Deno when it is available and otherwise uses Node.js.
+
 ### Installing FFmpeg
 
 *   **Windows:**
@@ -80,7 +82,7 @@ Ensure that FFmpeg is correctly installed and accessible from the command line b
 Installation
 ------------
 
-1.  Install Python 3.8 or newer.
+1.  Install Python 3.11 or newer.
 2.  Clone this repository or download the files:
     ```
     git clone https://github.com/rfulop/edi-discord-bot.git
@@ -102,10 +104,14 @@ Configuration
 
 After adding the bot to your Discord server, it may need specific permissions to operate correctly. Ensure that the bot has the necessary permissions in each channel where it needs to operate.
 
-To ensure that all commands are available on your server, use the `!sync` command to load and synchronize the bot commands with your Discord server.
+Commands are synchronized automatically to the guild configured by `GUILD_ID` when the bot starts.
 
 Usage
 -----
 
-Use commands prefixed by `!` or as slash commands as described in the commands section. For example, to start playing music, type `!play <URL or search term>` or `/play <URL or search term>`.
+Use slash commands as described above. For example, use `/play` with a YouTube URL or search terms to start playing music.
 
+Calendar Rollback
+-----------------
+
+The previous `date` and `pick` implementations are intentionally kept while `schedule` is being evaluated. The new calendar stores its data separately in `cogs/temp/calendar.sqlite3`, which is ignored by Git. Removing `cogs.schedule` from `initial_extensions` disables the new feature without affecting the legacy systems.

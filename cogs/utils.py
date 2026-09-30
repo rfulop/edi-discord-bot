@@ -1,86 +1,230 @@
-import logging
 import discord
-from discord.ext import commands
 from discord import app_commands
-from typing import Optional, Literal
-from discord.ext.commands import Greedy
+from discord.ext import commands
 
-logger = logging.getLogger(__name__)
+
+HELP_ENTRIES = {
+    "join": {
+        "category": "music",
+        "summary": "Connecte Edi à un salon vocal.",
+        "details": "Sans paramètre, Edi rejoint le salon vocal dans lequel tu te trouves.",
+        "usage": "/join [channel]",
+        "parameters": "`channel` *(optionnel)* — salon vocal à rejoindre.",
+    },
+    "play": {
+        "category": "music",
+        "summary": "Recherche un morceau ou ajoute une URL à la file d’attente.",
+        "details": "Une URL est ajoutée directement. Une recherche affiche cinq résultats parmi lesquels choisir.",
+        "usage": "/play search:<URL ou recherche>",
+        "parameters": "`search` — URL YouTube ou mots-clés, 250 caractères maximum.",
+    },
+    "pause": {
+        "category": "music",
+        "summary": "Met en pause le morceau en cours.",
+        "details": "La position de lecture est conservée jusqu’à `/resume`.",
+        "usage": "/pause",
+    },
+    "resume": {
+        "category": "music",
+        "summary": "Reprend une lecture mise en pause.",
+        "details": "N’a aucun effet si aucun morceau n’est en pause.",
+        "usage": "/resume",
+    },
+    "skip": {
+        "category": "music",
+        "summary": "Passe le morceau courant ou plusieurs morceaux de la file.",
+        "details": "Le morceau suivant démarre automatiquement s’il existe.",
+        "usage": "/skip [go_to]",
+        "parameters": "`go_to` *(optionnel, défaut : 1)* — nombre de morceaux à passer.",
+    },
+    "queue": {
+        "category": "music",
+        "summary": "Affiche la lecture courante et les 15 prochains morceaux.",
+        "details": "Les morceaux apparaissent dans leur ordre de lecture.",
+        "usage": "/queue",
+    },
+    "np": {
+        "category": "music",
+        "summary": "Affiche le morceau actuellement joué.",
+        "details": "Indique son titre, sa durée et la personne qui l’a demandé.",
+        "usage": "/np",
+    },
+    "loop": {
+        "category": "music",
+        "summary": "Ajoute plusieurs répétitions du morceau courant.",
+        "details": "Les répétitions sont placées à la fin de la file d’attente.",
+        "usage": "/loop rep:<nombre>",
+        "parameters": "`rep` — nombre de répétitions, limité à 10.",
+    },
+    "leave": {
+        "category": "music",
+        "summary": "Arrête la lecture, vide la file et quitte le salon vocal.",
+        "details": "Une nouvelle commande `/play` reconnectera automatiquement Edi.",
+        "usage": "/leave",
+    },
+    "schedule": {
+        "category": "calendar",
+        "summary": "Crée un calendrier Discord modifiable pour trouver une disponibilité commune.",
+        "details": (
+            "Les joueurs indiquent leurs créneaux disponibles ou possibles si nécessaire. "
+            "Le créateur choisit ensuite le créneau final et les heures exactes de l’événement."
+        ),
+        "usage": "/schedule role:<rôle> [days] [delay] [title] [reminders]",
+        "parameters": (
+            "`role` — rôle des joueurs concernés.\n"
+            "`days` *(optionnel, défaut : 7)* — nombre de jours proposés, de 1 à 7.\n"
+            "`delay` *(optionnel, défaut : 0)* — jours à attendre avant la première proposition.\n"
+            "`title` *(optionnel)* — nom de la session et de l’événement.\n"
+            "`reminders` *(optionnel, défaut : oui)* — relance chaque jour les joueurs sans réponse."
+        ),
+    },
+    "date": {
+        "category": "calendar",
+        "summary": "Crée un calendrier sur Framadate — ancien système.",
+        "details": "Conservé temporairement comme solution de repli pendant l’évaluation de `/schedule`.",
+        "usage": "/date role:<rôle> [days] [delay] [reminders]",
+        "parameters": (
+            "`role` — rôle des joueurs concernés.\n"
+            "`days` *(défaut : 7)* — nombre de jours proposés.\n"
+            "`delay` *(défaut : 0)* — délai avant le premier jour.\n"
+            "`reminders` *(défaut : oui)* — envoie des rappels aux non-répondants."
+        ),
+        "legacy": True,
+    },
+    "pick": {
+        "category": "calendar",
+        "summary": "Crée un sondage de dates avec des réactions — ancien système.",
+        "details": "Conservé temporairement comme solution de repli pendant l’évaluation de `/schedule`.",
+        "usage": "/pick role:<rôle> [days] [delay] [reminders]",
+        "parameters": (
+            "`role` — rôle des joueurs concernés.\n"
+            "`days` *(défaut : 7)* — nombre de jours proposés.\n"
+            "`delay` *(défaut : 0)* — délai avant le premier jour.\n"
+            "`reminders` *(défaut : oui)* — envoie des rappels aux non-répondants."
+        ),
+        "legacy": True,
+    },
+    "cleanup": {
+        "category": "moderation",
+        "summary": "Supprime les messages récents d’Edi dans le salon courant.",
+        "details": "Cette commande nécessite la permission Discord « Gérer les messages ».",
+        "usage": "/cleanup [scan_limit]",
+        "parameters": "`scan_limit` *(optionnel, défaut : 100)* — messages récents à examiner, de 1 à 1000.",
+    },
+}
+
+CATEGORY_LABELS = {
+    "music": "🎵 Musique",
+    "calendar": "📅 Calendrier et sessions",
+    "moderation": "🧹 Modération",
+}
 
 
 class Utils(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.Cog.listener()
-    async def on_ready(self):
-        logger.info('Utils cog is ready')
-
-    @staticmethod
-    async def on_command_error(ctx, error):
-        logger.error(f"Error in command {ctx.command}: {error}")
-        await ctx.reply(error, ephemeral=True)
-
-    async def cog_command_error(self, ctx, error: Exception) -> None:
-        logger.error(f"Error in cog command: {error}")
-        await ctx.reply(str(error), ephemeral=True)
-
-    @commands.hybrid_command(name='sync', with_app_command=True, brief="Syncronise les commandes pour la guilde",
-                             description="Syncronise les commandes pour la guilde")
-    @commands.guild_only()
-    @commands.is_owner()
-    async def sync(self, ctx, guilds: Greedy[discord.Object], spec: Optional[Literal["~", "*", "^"]] = None) -> None:
-        logger.info(f"Starting sync with spec: {spec}, for guilds: {guilds}")
-        if not guilds:
-            if spec == "~":
-                synced = await ctx.bot.tree.sync(guild=ctx.guild)
-                logger.info(f"Synced {len(synced)} commands to the guild {ctx.guild.id}")
-            elif spec == "*":
-                ctx.bot.tree.copy_global_to(guild=ctx.guild)
-                synced = await ctx.bot.tree.sync(guild=ctx.guild)
-                logger.info(f"Synced {len(synced)} global commands to the guild {ctx.guild.id}")
-            elif spec == "^":
-                ctx.bot.tree.clear_commands(guild=ctx.guild)
-                await ctx.bot.tree.sync(guild=ctx.guild)
-                synced = []
-                logger.info(f"Cleared and synced commands for guild {ctx.guild.id}")
-            else:
-                synced = await ctx.bot.tree.sync()
-                logger.info(f"Synced global commands.")
-
-            await ctx.send(
-                f"Synced {len(synced)} commands {'globally' if spec is None else 'to the current guild.'}"
+    @app_commands.command(
+        name="help", description="Affiche l’aide générale ou le détail d’une commande."
+    )
+    @app_commands.describe(command="Commande dont tu souhaites afficher le détail")
+    @app_commands.choices(
+        command=[
+            app_commands.Choice(name=f"/{name} — {entry['summary']}", value=name)
+            for name, entry in HELP_ENTRIES.items()
+        ]
+    )
+    async def help_command(
+        self, interaction: discord.Interaction, command: str | None = None
+    ):
+        if command:
+            await interaction.response.send_message(
+                embed=self.build_command_help(command), ephemeral=True
             )
             return
 
-        ret = 0
-        for guild in guilds:
-            try:
-                await ctx.bot.tree.sync(guild=guild)
-                ret += 1
-                logger.info(f"Successfully synced commands to guild {guild.id}")
-            except discord.HTTPException as e:
-                logger.error(f"Failed to sync commands to guild {guild.id}: {e}")
+        embed = discord.Embed(
+            title="Aide d’Edi",
+            description=(
+                "Utilise les commandes `/` ci-dessous. Pour afficher les paramètres et "
+                "le fonctionnement complet d’une commande, utilise `/help command:<commande>`."
+            ),
+            color=discord.Color.blue(),
+        )
+        for category, label in CATEGORY_LABELS.items():
+            entries = [
+                f"`/{name}` — {entry['summary']}"
+                for name, entry in HELP_ENTRIES.items()
+                if entry["category"] == category
+            ]
+            embed.add_field(
+                name=label,
+                value="\n".join(entries),
+                inline=False,
+            )
+        embed.set_footer(
+            text="Les éléments marqués « ancien système » sont conservés pour permettre un retour en arrière."
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        await ctx.send(f"Synced the tree to {ret}/{len(guilds)}.")
+    @staticmethod
+    def build_command_help(command):
+        entry = HELP_ENTRIES[command]
+        title = f"Aide — /{command}"
+        if entry.get("legacy"):
+            title += " · Ancien système"
+        embed = discord.Embed(
+            title=title,
+            description=entry["details"],
+            color=(
+                discord.Color.orange()
+                if entry.get("legacy")
+                else discord.Color.blue()
+            ),
+        )
+        embed.add_field(name="Utilisation", value=f"`{entry['usage']}`", inline=False)
+        embed.add_field(name="Description", value=entry["summary"], inline=False)
+        parameters = entry.get("parameters")
+        embed.add_field(
+            name="Paramètres",
+            value=parameters or "Cette commande ne prend aucun paramètre.",
+            inline=False,
+        )
+        embed.set_footer(text="Les paramètres entre crochets sont optionnels.")
+        return embed
 
-    @commands.hybrid_command(name='delete_edi_messages', with_app_command=True,
-                             brief="Supprime les messages de Edi",
-                             description="Supprime les messages de Edi dans le channel courant.")
+    @app_commands.command(
+        name="cleanup",
+        description="Supprime les messages récents d’Edi dans le salon courant.",
+    )
+    @app_commands.describe(
+        scan_limit="Nombre maximal de messages récents à examiner, de 1 à 1000"
+    )
     @app_commands.guild_only()
-    async def delete_bot_messages(self, ctx):
-        logger.info(f"Attempting to delete bot messages in channel {ctx.channel.id}")
-        if not ctx.interaction:
-            await ctx.message.delete()
-        count = 0
-        async for message in ctx.channel.history(limit=1000):
-            if message.author == self.bot.user:
-                count += 1
-                await message.delete()
-        logger.info(f"Deleted {count} messages from the bot in channel {ctx.channel.id}")
-        await ctx.send(f'{count} messages deleted.')
+    @app_commands.default_permissions(manage_messages=True)
+    @app_commands.checks.has_permissions(manage_messages=True)
+    async def cleanup(
+        self,
+        interaction: discord.Interaction,
+        scan_limit: app_commands.Range[int, 1, 1000] = 100,
+    ):
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "Cette commande doit être utilisée dans un salon textuel.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        deleted = await interaction.channel.purge(
+            limit=scan_limit,
+            check=lambda message: message.author.id == self.bot.user.id,
+            bulk=True,
+            reason=f"Cleanup requested by {interaction.user} ({interaction.user.id})",
+        )
+        await interaction.edit_original_response(
+            content=f"{len(deleted)} message(s) d’Edi supprimé(s) dans ce salon."
+        )
 
 
 async def setup(bot):
     await bot.add_cog(Utils(bot))
-    logger.info("Utils cog has been loaded")

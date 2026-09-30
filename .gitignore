@@ -1,5 +1,8 @@
 # Private files
 cogs/temp/polls.json
+cogs/temp/calendar.sqlite3
+cogs/temp/calendar.sqlite3-shm
+cogs/temp/calendar.sqlite3-wal
 nohup.out
 
 # Byte-compiled / optimized / DLL files
