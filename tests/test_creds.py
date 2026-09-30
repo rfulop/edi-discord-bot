@@ -95,6 +95,44 @@ class CredentialsTest(unittest.IsolatedAsyncioTestCase):
             await self.call(interaction())
             helper.assert_not_called()
 
+    async def test_ten_second_cooldown_reports_remaining_without_extension(self):
+        clock = [100.0]
+        with patch("cogs.creds.time", SimpleNamespace(monotonic=lambda: clock[0])), patch("cogs.creds.run_helper", AsyncMock(return_value=SUCCESS)) as helper:
+            await self.call(interaction())
+            self.assertEqual(self.cog.cooldowns[interaction().user.id], 110)
+            for now, remaining in ((104, 6), (109.1, 1)):
+                clock[0] = now
+                request = interaction()
+                await self.call(request)
+                self.assertIn(f"{remaining} seconde", request.edit_original_response.call_args.kwargs["content"])
+                self.assertEqual(self.cog.cooldowns[request.user.id], 110)
+                self.assertEqual(helper.await_count, 1)
+            clock[0] = 110
+            await self.call(interaction())
+            self.assertEqual(helper.await_count, 2)
+
+    async def test_helper_retry_deadline_is_not_extended_by_delivery_or_retry(self):
+        clock = [100.0]
+        request = interaction()
+        async def deliver(**kwargs):
+            clock[0] += 5
+        request.edit_original_response.side_effect = deliver
+        limited = {"ok": False, "error": "rate_limited", "retry_after": 26}
+        with patch("cogs.creds.time", SimpleNamespace(monotonic=lambda: clock[0])), patch("cogs.creds.run_helper", AsyncMock(side_effect=[limited, SUCCESS])) as helper:
+            await self.call(request)
+            self.assertEqual(self.cog.cooldowns[request.user.id], 126)
+            self.assertIn("26 secondes", request.edit_original_response.call_args.kwargs["content"])
+            clock[0] = 110
+            blocked = interaction()
+            await self.call(blocked)
+            self.assertIn("16 secondes", blocked.edit_original_response.call_args.kwargs["content"])
+            self.assertEqual(self.cog.cooldowns[request.user.id], 126)
+            self.assertEqual(helper.await_count, 1)
+            clock[0] = 126
+            await self.call(interaction())
+            self.assertEqual(helper.await_count, 2)
+            self.assertEqual(self.cog.cooldowns[request.user.id], 136)
+
     async def test_serial_queue_duplicate_cooldown_and_capacity(self):
         release = asyncio.Event()
         entered = asyncio.Event()

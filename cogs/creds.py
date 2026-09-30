@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -17,7 +18,7 @@ LOG = logging.getLogger(__name__)
 MAX_OUTPUT = 8192
 HELPER_TIMEOUT = 20
 TOTAL_TIMEOUT = 60
-COOLDOWN = 60
+COOLDOWN = 10
 MAX_REQUESTS = 6  # One running, five waiting.
 HELPER_INTERVAL = 2
 ERRORS = {"rate_limited", "forbidden", "invalid_request", "unavailable"}
@@ -198,7 +199,8 @@ class CredentialsCog(commands.Cog):
             await reply("Ta demande est déjà en cours.")
             return
         if user_id in self.cooldowns:
-            await reply("Attends une minute entre deux demandes d’identifiants.")
+            remaining = math.ceil(self.cooldowns[user_id] - now)
+            await reply(f"Réessaie dans {remaining} seconde{'s' if remaining != 1 else ''}.")
             return
         if len(self.pending) >= MAX_REQUESTS or len(self.cooldowns) >= 4096:
             await reply("Plusieurs demandes sont en cours. Réessaie dans un instant.")
@@ -206,6 +208,7 @@ class CredentialsCog(commands.Cog):
         self.pending.add(user_id)
         self.cooldowns[user_id] = now + COOLDOWN
         result = None
+        cooldown_until = None
         try:
             async with asyncio.timeout(TOTAL_TIMEOUT):
                 async with self.lock:
@@ -221,7 +224,10 @@ class CredentialsCog(commands.Cog):
                         result = await run_helper(self.config, payload)
                     finally:
                         self.last_helper_finished = time.monotonic()
+            cooldown_until = time.monotonic() + COOLDOWN
             if not result["ok"]:
+                if result["error"] == "rate_limited":
+                    cooldown_until = time.monotonic() + result["retry_after"]
                 LOG.info("creds failure %s", result["error"])
                 messages = {
                     "rate_limited": f"Trop de demandes. Réessaie dans {result['retry_after']} secondes.",
@@ -254,7 +260,12 @@ class CredentialsCog(commands.Cog):
             await reply("Impossible de terminer la demande. Le mot de passe a peut-être été modifié. Réessaie plus tard avec `/creds`.")
         finally:
             self.pending.discard(user_id)
-            self.cooldowns[user_id] = time.monotonic() + COOLDOWN
+            if cooldown_until is None:
+                cooldown_until = time.monotonic() + COOLDOWN
+            if cooldown_until > time.monotonic():
+                self.cooldowns[user_id] = cooldown_until
+            else:
+                self.cooldowns.pop(user_id, None)
             result = None
 
 
