@@ -102,6 +102,8 @@ def parse_result(raw, returncode, config):
             if (not isinstance(value, str) or not 1 <= len(value) <= maximum
                     or any(ord(c) < 32 or ord(c) == 127 for c in value)):
                 raise ValueError()
+            if key in ("login", "password") and "`" in value:
+                raise ValueError()
         if result.get("url") != config.url:
             raise ValueError()
         return {key: result[key] for key in ("ok", "login", "display_name", "password", "created")}
@@ -232,9 +234,8 @@ class CredentialsCog(commands.Cog):
             LOG.info("creds generation_succeeded")
             delivered = await reply(
                 f"**Tes identifiants du portail de jeu**\n{self.config.url}\n\n"
-                f"**Identifiant :** {safe(result['login'])}\n"
-                f"**Nom affiché :** {safe(result['display_name'])}\n"
-                f"**Nouveau mot de passe :** {safe(result['password'])}\n\n"
+                f"**Identifiant :**\n```\n{result['login']}\n```\n"
+                f"**Nouveau mot de passe :**\n```\n{result['password']}\n```\n\n"
                 "Ce mot de passe remplace le précédent. Tu peux l’enregistrer dans ton navigateur. "
                 "En cas d’oubli, relance `/creds`.\n"
                 "Ces identifiants concernent le portail Authelia, pas ton utilisateur Foundry."

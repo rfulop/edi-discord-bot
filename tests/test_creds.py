@@ -47,6 +47,8 @@ class ConfigTest(unittest.TestCase):
                           (json.dumps(SUCCESS).encode(), 1),
                           (json.dumps({**SUCCESS, "url": "https://wrong.test"}).encode(), 0),
                           (json.dumps({**SUCCESS, "password": "x\n"}).encode(), 0),
+                          (json.dumps({**SUCCESS, "password": "x`x"}).encode(), 0),
+                          (json.dumps({**SUCCESS, "login": "x`x"}).encode(), 0),
                           (json.dumps({"ok": False, "error": "unknown"}).encode(), 1)]:
             with self.subTest(raw=raw), self.assertRaises(Unavailable):
                 parse_result(raw, code, CONFIG)
@@ -75,7 +77,9 @@ class CredentialsTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(config.argv, CONFIG.argv)
             self.assertEqual(payload, {"guild_id": str(CONFIG.guild_id), "discord_user_id": str(request.user.id), "username": request.user.name, "display_name": request.user.display_name})
             kwargs = request.edit_original_response.call_args.kwargs
-            self.assertIn(discord.utils.escape_markdown(SUCCESS["password"]), kwargs["content"])
+            self.assertIn(f"```\n{SUCCESS['password']}\n```", kwargs["content"])
+            self.assertIn(f"```\n{SUCCESS['login']}\n```", kwargs["content"])
+            self.assertNotIn("Nom affiché", kwargs["content"])
             self.assertEqual(kwargs["allowed_mentions"].to_dict(), {"parse": []})
             self.assertIn("creds generation_succeeded", str(logs.output))
             self.assertIn("creds delivery_succeeded", str(logs.output))
