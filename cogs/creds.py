@@ -233,9 +233,10 @@ class CredentialsCog(commands.Cog):
                 return
             LOG.info("creds generation_succeeded")
             delivered = await reply(
-                f"**Tes identifiants du portail de jeu**\n{self.config.url}\n\n"
-                f"**Identifiant :**\n```\n{result['login']}\n```\n"
-                f"**Nouveau mot de passe :**\n```\n{result['password']}\n```\n\n"
+                f"**Accès à la table**\n\n"
+                f"**Lien de connexion**\n{self.config.url}\n\n"
+                f"**Identifiant**\n```\n{result['login']}\n```\n"
+                f"**Mot de passe**\n```\n{result['password']}\n```\n\n"
                 "Ce mot de passe remplace le précédent. Tu peux l’enregistrer dans ton navigateur. "
                 "En cas d’oubli, relance `/creds`.\n"
                 "Ces identifiants concernent le portail Authelia, pas ton utilisateur Foundry."

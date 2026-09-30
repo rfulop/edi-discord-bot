@@ -77,6 +77,7 @@ class CredentialsTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(config.argv, CONFIG.argv)
             self.assertEqual(payload, {"guild_id": str(CONFIG.guild_id), "discord_user_id": str(request.user.id), "username": request.user.name, "display_name": request.user.display_name})
             kwargs = request.edit_original_response.call_args.kwargs
+            self.assertTrue(kwargs["content"].startswith(f"**Accès à la table**\n\n**Lien de connexion**\n{CONFIG.url}\n\n"))
             self.assertIn(f"```\n{SUCCESS['password']}\n```", kwargs["content"])
             self.assertIn(f"```\n{SUCCESS['login']}\n```", kwargs["content"])
             self.assertNotIn("Nom affiché", kwargs["content"])
