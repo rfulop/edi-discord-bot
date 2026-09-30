@@ -4,6 +4,12 @@ from discord.ext import commands
 
 
 HELP_ENTRIES = {
+    "creds": {
+        "category": "utils",
+        "summary": "Crée ou renouvelle tes identifiants du portail de jeu.",
+        "details": "Les identifiants Authelia sont envoyés dans une réponse privée. Chaque demande remplace le mot de passe précédent. Ils sont distincts de ton utilisateur Foundry.",
+        "usage": "/creds",
+    },
     "join": {
         "category": "music",
         "summary": "Connecte Edi à un salon vocal.",
@@ -88,6 +94,7 @@ HELP_ENTRIES = {
 }
 
 CATEGORY_LABELS = {
+    "utils": "🔑 Accès au portail",
     "music": "🎵 Musique",
     "calendar": "📅 Calendrier et sessions",
     "moderation": "🧹 Modération",

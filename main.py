@@ -49,6 +49,7 @@ class MyBot(commands.Bot):
             'cogs.music',
             'cogs.schedule',
             'cogs.utils',
+            'cogs.creds',
         ]
 
     async def setup_hook(self):
