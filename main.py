@@ -48,7 +48,6 @@ class MyBot(commands.Bot):
         self.initial_extensions = [
             'cogs.music',
             'cogs.schedule',
-            'cogs.event',
             'cogs.utils',
         ]
 

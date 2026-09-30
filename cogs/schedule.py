@@ -15,6 +15,7 @@ from cogs.calendar_store import (
     PERIOD_LABELS,
 )
 from cogs.bot_responses.messages import (
+    EVENT_CREATED_MESSAGE,
     REMINDER_MESSAGES_1,
     REMINDER_MESSAGES_2,
     REMINDER_MESSAGES_3,
@@ -23,6 +24,7 @@ from cogs.bot_responses.messages import (
 LOGGER = logging.getLogger(__name__)
 TIMEZONE = ZoneInfo("Europe/Paris")
 DATABASE_PATH = Path(__file__).resolve().parent / "temp" / "calendar.sqlite3"
+EVENT_IMAGE_PATH = Path(__file__).resolve().parent.parent / "img" / "tavern.png"
 WEEKDAY_LABELS = (
     "lundi",
     "mardi",
@@ -51,13 +53,13 @@ def format_member_names(user_ids, guild, max_length=240):
     for user_id in user_ids:
         member = guild.get_member(user_id) if guild else None
         display_name = member.display_name if member else f"Utilisateur {user_id}"
-        names.append(discord.utils.escape_markdown(display_name))
-    names.sort(key=str.casefold)
+        names.append((display_name.casefold(), f"<@{user_id}>"))
+    names.sort()
     if not names:
         return "Personne"
 
     visible_names = []
-    for index, name in enumerate(names):
+    for index, (_, name) in enumerate(names):
         remaining = len(names) - index
         suffix = f" … +{remaining}" if remaining else ""
         candidate = ", ".join((*visible_names, name))
@@ -85,162 +87,79 @@ def split_message_lines(lines, max_length=1900):
     return chunks
 
 
-class SlotStatusButton(discord.ui.Button):
-    STATUS_STYLES = {
-        None: ("⛔", "Indisponible", discord.ButtonStyle.secondary),
-        AvailabilityStatus.AVAILABLE: (
-            "✅",
-            "Disponible",
-            discord.ButtonStyle.success,
-        ),
-        AvailabilityStatus.IF_NEEDED: (
-            "🟡",
-            "Si nécessaire",
-            discord.ButtonStyle.primary,
-        ),
-    }
-    NEXT_STATUS = {
-        None: AvailabilityStatus.AVAILABLE,
-        AvailabilityStatus.AVAILABLE: AvailabilityStatus.IF_NEEDED,
-        AvailabilityStatus.IF_NEEDED: None,
-    }
+class LinkView(discord.ui.View):
+    def __init__(self, label, url, emoji):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(label=label, url=url, emoji=emoji))
 
-    def __init__(self, slot, status):
-        emoji, _, style = self.STATUS_STYLES[status]
-        super().__init__(
-            label=PERIOD_LABELS[slot.period],
-            emoji=emoji,
-            style=style,
-            row=0,
-        )
-        self.slot = slot
+
+class AvailabilitySlotButton(discord.ui.Button):
+    def __init__(self, slot, status, row):
+        period_icon = "☀️" if slot.period.value == "afternoon" else "🌑"
+        weekday = WEEKDAY_LABELS[slot.day.weekday()][:3].title()
+        period = PERIOD_LABELS[slot.period].lower()
+        super().__init__(label=f"{weekday} {slot.day:%d/%m} · {period} {period_icon}", row=row)
+        self.slot_id = slot.id
+        self.set_status(status)
+
+    def set_status(self, status):
+        self.emoji, self.style = {
+            None: ("❌", discord.ButtonStyle.secondary),
+            AvailabilityStatus.AVAILABLE: ("✅", discord.ButtonStyle.success),
+            AvailabilityStatus.IF_NEEDED: ("🟡", discord.ButtonStyle.primary),
+        }[status]
 
     async def callback(self, interaction: discord.Interaction):
-        current_status = self.view.choices.get(self.slot.id)
-        next_status = self.NEXT_STATUS[current_status]
-        if next_status is None:
-            self.view.choices.pop(self.slot.id, None)
+        current = self.view.choices.get(self.slot_id)
+        status = {
+            None: AvailabilityStatus.AVAILABLE,
+            AvailabilityStatus.AVAILABLE: AvailabilityStatus.IF_NEEDED,
+            AvailabilityStatus.IF_NEEDED: None,
+        }[current]
+        if status is None:
+            self.view.choices.pop(self.slot_id, None)
         else:
-            self.view.choices[self.slot.id] = next_status
-        await self.view.render(interaction)
+            self.view.choices[self.slot_id] = status
+        self.set_status(status)
+        await interaction.response.edit_message(view=self.view)
 
 
-class DailyAvailabilityView(discord.ui.View):
-    def __init__(self, cog, schedule_id, user_id, choices, day_index=0):
+class AvailabilityView(discord.ui.View):
+    def __init__(self, cog, schedule_id, choices, user_id):
         super().__init__(timeout=900)
         self.cog = cog
         self.schedule_id = schedule_id
         self.user_id = user_id
         self.choices = dict(choices)
-        self.days = []
-        for slot in cog.store.get_slots(schedule_id):
-            if not self.days or self.days[-1][0].day != slot.day:
-                self.days.append([])
-            self.days[-1].append(slot)
-        self.day_index = max(0, min(day_index, len(self.days) - 1))
-        self.rebuild_items()
+        slots = cog.store.get_slots(schedule_id)
+        per_row = 3 if len(slots) <= 12 else 4
+        for index, slot in enumerate(slots):
+            self.add_item(AvailabilitySlotButton(slot, choices.get(slot.id), index // per_row))
 
-    @property
-    def current_slots(self):
-        return self.days[self.day_index]
+    async def interaction_check(self, interaction):
+        return interaction.user.id == self.user_id
 
-    def rebuild_items(self):
-        self.clear_items()
-        for slot in self.current_slots:
-            self.add_item(SlotStatusButton(slot, self.choices.get(slot.id)))
-        self.add_item(
-            NavigationButton(
-                label="◀",
-                offset=-1,
-                disabled=self.day_index == 0,
+    @discord.ui.button(label="Enregistrer", style=discord.ButtonStyle.primary, row=4)
+    async def save(self, interaction: discord.Interaction, button: discord.ui.Button):
+        schedule = self.cog.store.get_schedule(self.schedule_id)
+        if schedule is None or schedule.status != "open":
+            await interaction.response.send_message(
+                "Ce calendrier n'est plus ouvert. Tes réponses n'ont pas été modifiées.",
+                ephemeral=True,
             )
+            return
+        self.cog.store.save_user_choices(
+            self.schedule_id, interaction.user.id,
+            {slot_id for slot_id, status in self.choices.items() if status == AvailabilityStatus.AVAILABLE},
+            {slot_id for slot_id, status in self.choices.items() if status == AvailabilityStatus.IF_NEEDED},
         )
-        self.add_item(SaveAvailabilityButton())
-        self.add_item(
-            NavigationButton(
-                label="▶",
-                offset=1,
-                disabled=self.day_index == len(self.days) - 1,
-            )
-        )
-
-    def build_content(self):
-        current_day = self.current_slots[0].day
-        weekday = WEEKDAY_LABELS[current_day.weekday()].title()
-        return (
-            f"### {weekday} {current_day.strftime('%d/%m/%Y')} "
-            f"· {self.day_index + 1}/{len(self.days)}\n"
-            "Clique sur un créneau pour changer : ⛔ → ✅ → 🟡"
-        )
-
-    async def render(self, interaction):
-        replacement = DailyAvailabilityView(
-            self.cog,
-            self.schedule_id,
-            self.user_id,
-            self.choices,
-            self.day_index,
-        )
-        await interaction.response.edit_message(
-            content=replacement.build_content(), view=replacement
-        )
-
-
-class NavigationButton(discord.ui.Button):
-    def __init__(self, *, label, offset, disabled):
-        super().__init__(
-            label=label,
-            style=discord.ButtonStyle.secondary,
-            disabled=disabled,
-            row=1,
-        )
-        self.offset = offset
-
-    async def callback(self, interaction: discord.Interaction):
-        replacement = DailyAvailabilityView(
-            self.view.cog,
-            self.view.schedule_id,
-            self.view.user_id,
-            self.view.choices,
-            self.view.day_index + self.offset,
-        )
-        await interaction.response.edit_message(
-            content=replacement.build_content(), view=replacement
-        )
-
-
-class SaveAvailabilityButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(
-            label="Enregistrer",
-            style=discord.ButtonStyle.primary,
-            row=1,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        available_ids = {
-            slot_id
-            for slot_id, status in self.view.choices.items()
-            if status is AvailabilityStatus.AVAILABLE
-        }
-        if_needed_ids = {
-            slot_id
-            for slot_id, status in self.view.choices.items()
-            if status is AvailabilityStatus.IF_NEEDED
-        }
-        self.view.cog.store.save_user_choices(
-            self.view.schedule_id,
-            interaction.user.id,
-            available_ids,
-            if_needed_ids,
-        )
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        await self.view.cog.refresh_message(self.view.schedule_id)
+        await interaction.response.defer()
+        await self.cog.refresh_message(self.schedule_id)
         await interaction.edit_original_response(
             content="Tes disponibilités ont été enregistrées. Tu peux les modifier avec le même bouton.",
             view=None,
         )
-        self.view.stop()
+        self.stop()
 
 
 class EventTimeModal(discord.ui.Modal):
@@ -295,6 +214,11 @@ class EventTimeModal(discord.ui.Modal):
             )
             return
 
+        role = guild.get_role(schedule.role_id)
+        player_ids = {member.id for member in role.members if not member.bot} if role else set()
+        players = format_member_names(player_ids, guild, 700)
+        welcome = random.choice(EVENT_CREATED_MESSAGE).format(players)
+        event_description = f"{welcome}\n\nOrganisé par {interaction.user.mention}"
         await interaction.response.defer(ephemeral=True, thinking=True)
         if not self.cog.store.try_begin_finalization(self.schedule_id):
             await interaction.edit_original_response(
@@ -304,20 +228,42 @@ class EventTimeModal(discord.ui.Modal):
         try:
             event = await guild.create_scheduled_event(
                 name=schedule.title,
-                description=f"Session organisée par {interaction.user.mention}",
+                description=event_description,
                 start_time=start_at,
                 end_time=end_at,
                 entity_type=discord.EntityType.voice,
                 channel=voice_channel,
                 privacy_level=discord.PrivacyLevel.guild_only,
+                image=EVENT_IMAGE_PATH.read_bytes(),
             )
         except Exception:
             self.cog.store.cancel_finalization(self.schedule_id)
             raise
         self.cog.store.finalize(self.schedule_id, event.id)
         await self.cog.refresh_message(self.schedule_id)
+        channel = self.cog.bot.get_channel(schedule.channel_id)
+        try:
+            if channel is None:
+                channel = await self.cog.bot.fetch_channel(schedule.channel_id)
+            embed = discord.Embed(
+                title=schedule.title,
+                description=f"{welcome}\n\n"
+                            f"📅 <t:{int(start_at.timestamp())}:F>\n"
+                            f"🕒 <t:{int(start_at.timestamp())}:t> – <t:{int(end_at.timestamp())}:t>\n"
+                            f"🔊 {voice_channel.mention}",
+                color=discord.Color.from_rgb(155, 89, 182),
+            )
+            embed.set_image(url="attachment://tavern.png")
+            await channel.send(
+                embed=embed, file=discord.File(EVENT_IMAGE_PATH, filename="tavern.png"),
+                view=LinkView("Voir l’événement", event.url, "📅"),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except discord.HTTPException:
+            LOGGER.exception("Event created but public announcement failed for schedule %s", self.schedule_id)
         await interaction.edit_original_response(
-            content=f"Événement créé : {event.url}"
+            content="Événement créé.",
+            view=LinkView("Voir l’événement", event.url, "📅"),
         )
 
     async def on_error(self, interaction, error):
@@ -343,13 +289,14 @@ class FinalSlotSelect(discord.ui.Select):
     def __init__(self, cog, schedule_id):
         self.cog = cog
         self.schedule_id = schedule_id
-        scores = cog.store.get_scores(schedule_id)
+        scores = cog.ranked_slots(schedule_id)
+        count = cog.player_count(schedule_id)
         self.slots = {score.slot.id: score.slot for score in scores}
         options = [
             discord.SelectOption(
                 label=format_slot_label(score.slot),
                 value=str(score.slot.id),
-                description=f"{score.available} disponibles · {score.if_needed} si nécessaire",
+                description=f"✅ {score.available}/{count} · ✅ + 🟡 {score.total}/{count}",
             )
             for score in scores
         ]
@@ -414,7 +361,8 @@ class ScheduleView(discord.ui.View):
             item.disabled = disabled
 
     @discord.ui.button(
-        label="Répondre / modifier mes disponibilités",
+        label="Mes disponibilités",
+        emoji="📅",
         style=discord.ButtonStyle.primary,
         custom_id="schedule:respond",
     )
@@ -444,20 +392,18 @@ class ScheduleView(discord.ui.View):
         choices = self.cog.store.get_user_choices(
             self.schedule_id, interaction.user.id
         )
-        view = DailyAvailabilityView(
-            self.cog,
-            self.schedule_id,
-            interaction.user.id,
-            choices,
-        )
         await interaction.response.send_message(
-            view.build_content(),
-            view=view,
+            "### 📅 Mes disponibilités\n"
+            "Clique sur un créneau pour changer son statut :\n"
+            "❌ Indisponible → ✅ Disponible → 🟡 Si nécessaire\n"
+            "Puis clique sur **Enregistrer**. Les changements ne sont pas enregistrés avant validation.",
+            view=AvailabilityView(self.cog, self.schedule_id, choices, interaction.user.id),
             ephemeral=True,
         )
 
     @discord.ui.button(
         label="Choisir la date · MJ",
+        emoji="🎲",
         style=discord.ButtonStyle.success,
         custom_id="schedule:finalize",
     )
@@ -475,9 +421,9 @@ class ScheduleView(discord.ui.View):
                 ephemeral=True,
             )
             return
-        if not self.cog.store.get_respondent_ids(self.schedule_id):
+        if not self.cog.ranked_slots(self.schedule_id):
             await interaction.response.send_message(
-                "Aucune disponibilité n'a encore été enregistrée.", ephemeral=True
+                "Aucun créneau ne comporte de disponibilité pour le moment.", ephemeral=True
             )
             return
         detail_embed = self.cog.build_detail_embed(self.schedule_id)
@@ -546,14 +492,6 @@ class ScheduleCog(commands.Cog, name="Calendrier"):
             self.store.disable_reminders(schedule.id)
             return
 
-        channel = self.bot.get_channel(schedule.channel_id)
-        if channel is None:
-            try:
-                channel = await self.bot.fetch_channel(schedule.channel_id)
-            except discord.NotFound:
-                self.store.disable_reminders(schedule.id)
-                return
-
         calendar_url = (
             f"https://discord.com/channels/{schedule.guild_id}/"
             f"{schedule.channel_id}/{schedule.message_id}"
@@ -561,15 +499,29 @@ class ScheduleCog(commands.Cog, name="Calendrier"):
         message_group = REMINDER_MESSAGE_GROUPS[
             min(schedule.reminder_count, len(REMINDER_MESSAGE_GROUPS) - 1)
         ]
-        reminder_lines = [
-            random.choice(message_group).format(member.mention, calendar_url)
-            for member in missing_members
-        ]
-        allowed_mentions = discord.AllowedMentions(
-            users=True, roles=False, everyone=False
-        )
-        for content in split_message_lines(reminder_lines):
-            await channel.send(content, allowed_mentions=allowed_mentions)
+        blocked_members = []
+        for member in missing_members:
+            content = random.choice(message_group).format(member.mention, calendar_url)
+            try:
+                await member.send(content, allowed_mentions=discord.AllowedMentions.none())
+            except discord.Forbidden:
+                blocked_members.append(member)
+            except discord.HTTPException:
+                LOGGER.exception("Unable to send reminder DM to member %s", member.id)
+
+        if blocked_members:
+            channel = self.bot.get_channel(schedule.channel_id)
+            if channel is None:
+                channel = await self.bot.fetch_channel(schedule.channel_id)
+            lines = [
+                random.choice(message_group).format(member.mention, calendar_url)
+                for member in blocked_members
+            ]
+            allowed_mentions = discord.AllowedMentions(
+                users=[member for member in blocked_members], roles=False, everyone=False,
+            )
+            for content in split_message_lines(lines):
+                await channel.send(content, allowed_mentions=allowed_mentions)
         self.store.mark_reminder_sent(schedule.id)
 
     def build_embed(self, schedule_id):
@@ -578,10 +530,10 @@ class ScheduleCog(commands.Cog, name="Calendrier"):
         role = guild.get_role(schedule.role_id) if guild else None
         member_ids = {member.id for member in role.members if not member.bot} if role else set()
         respondent_ids = self.store.get_respondent_ids(schedule_id)
-        scores = self.store.get_scores(schedule_id)
+        slots = self.store.get_slots(schedule_id)
         slot_responses = self.store.get_slot_responses(schedule_id)
 
-        embed = discord.Embed(title=schedule.title, color=discord.Color.blue())
+        embed = discord.Embed(title=f"🎲 {schedule.title}", color=discord.Color.from_rgb(155, 89, 182))
         if schedule.status == "closed":
             embed.description = "✅ Calendrier clôturé — l'événement Discord a été créé."
         else:
@@ -593,38 +545,45 @@ class ScheduleCog(commands.Cog, name="Calendrier"):
             embed.description = (
                 f"**Réponses : {len(respondent_ids & member_ids)}/{len(member_ids)}**\n"
                 + (
-                    f"En attente : {format_member_names(waiting_members, guild)}\n"
+                    f"**Sans réponse :** {format_member_names(waiting_members, guild)}\n"
                     if waiting_members
-                    else ""
+                    else "**Tous les joueurs ont répondu.**\n" if member_ids else ""
                 )
-                + "Clique sur le bouton pour enregistrer ou modifier tes disponibilités."
+                + "Indique ou modifie tes disponibilités avec le bouton ci-dessous.\n✅ Disponible · 🟡 Si nécessaire · ❌ Indisponible"
             )
-        ranked_scores = [score for score in scores if score.total > 0][:5]
-        for score in ranked_scores:
-            responses = slot_responses[score.slot.id]
+        responded_members = respondent_ids & member_ids
+        name_limit = min(180, 4000 // max(1, len(slots) * 3))
+        for slot in slots:
+            responses = slot_responses[slot.id]
+            available = responses[AvailabilityStatus.AVAILABLE]
+            if_needed = responses[AvailabilityStatus.IF_NEEDED]
+            if not available and not if_needed:
+                continue
+            unavailable = responded_members - available - if_needed
             lines = []
-            if responses[AvailabilityStatus.AVAILABLE]:
-                lines.append(
-                    f"✅ {format_member_names(responses[AvailabilityStatus.AVAILABLE], guild)}"
-                )
-            if responses[AvailabilityStatus.IF_NEEDED]:
-                lines.append(
-                    f"🟡 {format_member_names(responses[AvailabilityStatus.IF_NEEDED], guild)}"
-                )
+            for emoji, users in (("✅", available), ("🟡", if_needed), ("❌", unavailable)):
+                if users:
+                    lines.append(format_member_names(users, guild, name_limit).replace("<@", f"{emoji} <@"))
             embed.add_field(
-                name=format_slot_label(score.slot),
-                value="\n".join(lines),
-                inline=False,
-            )
-        if not ranked_scores:
-            embed.add_field(
-                name="Meilleurs créneaux",
-                value="Aucun créneau favorable pour le moment.",
+                name=format_slot_label(slot) + (" ☀️" if slot.period.value == "afternoon" else " 🌑"),
+                value=" · ".join(lines) or "Aucune réponse pour le moment.",
                 inline=False,
             )
         if role:
             embed.set_footer(text=f"Table : {role.name}")
         return embed
+
+    def player_count(self, schedule_id):
+        schedule = self.store.get_schedule(schedule_id)
+        guild = self.bot.get_guild(schedule.guild_id)
+        role = guild.get_role(schedule.role_id) if guild else None
+        return sum(not member.bot for member in role.members) if role else 0
+
+    def ranked_slots(self, schedule_id):
+        return sorted(
+            (score for score in self.store.get_scores(schedule_id) if score.total > 0),
+            key=lambda score: (-score.available, -score.total, score.slot.day, score.slot.id),
+        )
 
     def build_detail_embed(self, schedule_id):
         schedule = self.store.get_schedule(schedule_id)
@@ -632,17 +591,17 @@ class ScheduleCog(commands.Cog, name="Calendrier"):
         slot_responses = self.store.get_slot_responses(schedule_id)
         embed = discord.Embed(
             title="Détail des disponibilités",
-            description="✅ Disponible · 🟡 Si nécessaire",
             color=discord.Color.green(),
         )
-        for score in self.store.get_scores(schedule_id):
+        count = self.player_count(schedule_id)
+        for score in self.ranked_slots(schedule_id):
             responses = slot_responses[score.slot.id]
-            lines = [
-                f"✅ {format_member_names(responses[AvailabilityStatus.AVAILABLE], guild, 180)}",
-                f"🟡 {format_member_names(responses[AvailabilityStatus.IF_NEEDED], guild, 180)}",
-            ]
-            field_name = format_slot_label(score.slot)
-            field_value = "\n".join(lines)
+            lines = []
+            for emoji, status in (("✅", AvailabilityStatus.AVAILABLE), ("🟡", AvailabilityStatus.IF_NEEDED)):
+                if responses[status]:
+                    lines.append(f"{emoji} {format_member_names(responses[status], guild, 180)}")
+            field_name = format_slot_label(score.slot) + (" ☀️" if score.slot.period.value == "afternoon" else " 🌑") + f" · {score.total}/{count}"
+            field_value = " · ".join(lines)
             if len(embed) + len(field_name) + len(field_value) > 5800:
                 embed.set_footer(text="Détail tronqué car le message est trop long.")
                 break
@@ -661,15 +620,41 @@ class ScheduleCog(commands.Cog, name="Calendrier"):
             message = await channel.fetch_message(schedule.message_id)
             await message.edit(
                 embed=self.build_embed(schedule_id),
+                allowed_mentions=discord.AllowedMentions.none(),
                 view=ScheduleView(
                     self, schedule_id, disabled=schedule.status != "open"
                 ),
             )
         except discord.NotFound:
             LOGGER.warning("Schedule message %s no longer exists", schedule.message_id)
+            return
+        await self.notify_completion(schedule_id, channel)
+
+    async def notify_completion(self, schedule_id, channel):
+        schedule = self.store.get_schedule(schedule_id)
+        guild = self.bot.get_guild(schedule.guild_id)
+        role = guild.get_role(schedule.role_id) if guild else None
+        members = {member.id for member in role.members if not member.bot} if role else set()
+        if schedule.status != "open" or not members:
+            return
+        if not members <= self.store.get_respondent_ids(schedule_id):
+            return
+        if not self.store.claim_completion_notification(schedule_id):
+            return
+        try:
+            await channel.send(
+                f"<@{schedule.creator_id}> Tous les joueurs ont répondu au calendrier **"
+                f"{discord.utils.escape_markdown(schedule.title)}**. Tu peux choisir une date avec le bouton « Choisir la date · MJ ».",
+                view=LinkView("Voir le résultat du sondage",
+                              f"https://discord.com/channels/{schedule.guild_id}/{schedule.channel_id}/{schedule.message_id}", "📊"),
+                allowed_mentions=discord.AllowedMentions(users=[discord.Object(id=schedule.creator_id)], roles=False, everyone=False),
+            )
+        except Exception:
+            self.store.release_completion_notification(schedule_id)
+            LOGGER.exception("Unable to send completion notification for schedule %s", schedule_id)
 
     @app_commands.command(
-        name="schedule", description="Crée un calendrier de disponibilités pour une table."
+        name="date", description="Crée un calendrier de disponibilités pour une table."
     )
     @app_commands.describe(
         role="Rôle des joueurs concernés",
@@ -702,7 +687,7 @@ class ScheduleCog(commands.Cog, name="Calendrier"):
             channel_id=interaction.channel_id,
             role_id=role.id,
             creator_id=interaction.user.id,
-            title=title or f"Prochaine session — {role.name}",
+            title=title or ("Prochaine session" if role.is_default() else f"Prochaine session — {role.name}"),
             start_day=start_day,
             days=days,
             earliest_slot_start=(
@@ -711,11 +696,14 @@ class ScheduleCog(commands.Cog, name="Calendrier"):
             reminders_enabled=reminders,
         )
         message = await interaction.followup.send(
-            content=role.mention,
+            content="@everyone" if role.is_default() else role.mention,
             embed=self.build_embed(schedule_id),
             view=ScheduleView(self, schedule_id),
             wait=True,
-            allowed_mentions=discord.AllowedMentions(roles=True),
+            allowed_mentions=discord.AllowedMentions(
+                everyone=role.is_default(), roles=[role] if not role.is_default() else False,
+                users=False, replied_user=False,
+            ),
         )
         self.store.set_message_id(schedule_id, message.id)
 

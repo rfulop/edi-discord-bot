@@ -10,7 +10,7 @@ Features
 --------
 
 *   **Music**: Full control over a music queue with commands for playing, pausing, resuming, and skipping tracks.
-*   **Calendar**: Collects and updates player availability directly in Discord with `schedule`, while the previous `date` and `pick` commands remain available during the transition.
+*   **Calendar**: Collects and updates player availability directly in Discord with `date`. The legacy Framadate and reaction-based calendars are disabled.
 *   **Utils**: Various utility tools for managing the bot and messages on the server.
 *   **Language**: All messages sent by the bot are exclusively in French.
 
@@ -20,9 +20,7 @@ Commands
 Commands use Discord's slash-command interface.
 
 *   **Event**
-    *   `schedule`: Creates an editable availability calendar directly in Discord, with daily reminders for players who have not answered. The game master selects the voice channel when finalizing the event.
-    *   `date`: Creates a poll on the Framadate website for scheduling.
-    *   `pick`: Creates a poll directly on Discord proposing multiple dates.
+    *   `date`: Creates an editable availability calendar directly in Discord, with a private button panel for the whole period and daily reminders by DM for players who have not answered, with a channel mention if DMs are blocked. Weekdays offer evenings; weekends offer afternoons and evenings. Exact hours are chosen when finalizing. The game master selects the voice channel when finalizing the event.
 *   **Music**
     *   `join`: Joins a voice channel.
     *   `leave`: Leaves the voice channel and stops the music.
@@ -114,4 +112,4 @@ Use slash commands as described above. For example, use `/play` with a YouTube U
 Calendar Rollback
 -----------------
 
-The previous `date` and `pick` implementations are intentionally kept while `schedule` is being evaluated. The new calendar stores its data separately in `cogs/temp/calendar.sqlite3`, which is ignored by Git. Removing `cogs.schedule` from `initial_extensions` disables the new feature without affecting the legacy systems.
+The legacy Framadate and reaction-based implementations are retained in `cogs.event`, but this extension is not loaded: their commands and background reminders are disabled. The current `/date` calendar stores its data separately in `cogs/temp/calendar.sqlite3`, which is ignored by Git. To restore the legacy calendars, replace `cogs.schedule` with `cogs.event` in `initial_extensions`, update the help entries, and restart the bot. The two extensions must not be loaded together because both register `/date`.

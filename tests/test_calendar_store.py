@@ -12,7 +12,7 @@ from cogs.calendar_store import (
 
 
 class SlotGenerationTest(unittest.TestCase):
-    def test_weekdays_have_two_periods_and_weekends_have_three(self):
+    def test_weekdays_have_evening_and_weekends_also_afternoon(self):
         # 2026-09-04 is a Friday; the next two days are the weekend.
         specs = list(generate_slot_specs(date(2026, 9, 4), 3))
         periods_by_day = {}
@@ -20,10 +20,10 @@ class SlotGenerationTest(unittest.TestCase):
             periods_by_day.setdefault(slot_day, []).append(period)
         self.assertEqual(
             periods_by_day[date(2026, 9, 4)],
-            [SlotPeriod.LATE_AFTERNOON, SlotPeriod.EVENING],
+            [SlotPeriod.EVENING],
         )
-        self.assertEqual(len(periods_by_day[date(2026, 9, 5)]), 3)
-        self.assertEqual(len(periods_by_day[date(2026, 9, 6)]), 3)
+        self.assertEqual(len(periods_by_day[date(2026, 9, 5)]), 2)
+        self.assertEqual(len(periods_by_day[date(2026, 9, 6)]), 2)
 
     def test_elapsed_slots_are_excluded(self):
         specs = list(

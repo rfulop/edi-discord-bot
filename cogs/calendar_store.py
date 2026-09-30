@@ -73,7 +73,7 @@ def generate_slot_specs(
 ):
     for offset in range(days):
         current_day = start_day + timedelta(days=offset)
-        periods = [SlotPeriod.LATE_AFTERNOON, SlotPeriod.EVENING]
+        periods = [SlotPeriod.EVENING]
         if current_day.weekday() >= 5:
             periods.insert(0, SlotPeriod.AFTERNOON)
         for period in periods:
@@ -133,6 +133,10 @@ class CalendarStore:
                     PRIMARY KEY(schedule_id, slot_id, user_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS completion_notifications (
+                    schedule_id INTEGER PRIMARY KEY REFERENCES schedules(id) ON DELETE CASCADE
+                );
+
                 CREATE TABLE IF NOT EXISTS schedule_responses (
                     schedule_id INTEGER NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
                     user_id INTEGER NOT NULL,
@@ -165,6 +169,18 @@ class CalendarStore:
                 connection.execute(
                     "ALTER TABLE schedules ADD COLUMN reminder_count INTEGER NOT NULL DEFAULT 0"
                 )
+
+    def claim_completion_notification(self, schedule_id):
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO completion_notifications (schedule_id) VALUES (?)",
+                (schedule_id,),
+            )
+            return cursor.rowcount == 1
+
+    def release_completion_notification(self, schedule_id):
+        with self.connect() as connection:
+            connection.execute("DELETE FROM completion_notifications WHERE schedule_id = ?", (schedule_id,))
 
     def create_schedule(
         self,

@@ -62,47 +62,21 @@ HELP_ENTRIES = {
         "details": "Une nouvelle commande `/play` reconnectera automatiquement Edi.",
         "usage": "/leave",
     },
-    "schedule": {
+    "date": {
         "category": "calendar",
         "summary": "Crée un calendrier Discord modifiable pour trouver une disponibilité commune.",
         "details": (
-            "Les joueurs indiquent leurs créneaux disponibles ou possibles si nécessaire. "
+            "Les joueurs indiquent leurs disponibilités avec des boutons dans un message privé de l’interaction : soir en semaine, après-midi et soir le week-end. "
             "Le créateur choisit ensuite le créneau final et les heures exactes de l’événement."
         ),
-        "usage": "/schedule role:<rôle> [days] [delay] [title] [reminders]",
+        "usage": "/date role:<rôle> [days] [delay] [title] [reminders]",
         "parameters": (
             "`role` — rôle des joueurs concernés.\n"
             "`days` *(optionnel, défaut : 7)* — nombre de jours proposés, de 1 à 7.\n"
             "`delay` *(optionnel, défaut : 0)* — jours à attendre avant la première proposition.\n"
             "`title` *(optionnel)* — nom de la session et de l’événement.\n"
-            "`reminders` *(optionnel, défaut : oui)* — relance chaque jour les joueurs sans réponse."
+            "`reminders` *(optionnel, défaut : oui)* — relance chaque jour en MP les joueurs sans réponse ; mention dans le salon si le MP est bloqué."
         ),
-    },
-    "date": {
-        "category": "calendar",
-        "summary": "Crée un calendrier sur Framadate — ancien système.",
-        "details": "Conservé temporairement comme solution de repli pendant l’évaluation de `/schedule`.",
-        "usage": "/date role:<rôle> [days] [delay] [reminders]",
-        "parameters": (
-            "`role` — rôle des joueurs concernés.\n"
-            "`days` *(défaut : 7)* — nombre de jours proposés.\n"
-            "`delay` *(défaut : 0)* — délai avant le premier jour.\n"
-            "`reminders` *(défaut : oui)* — envoie des rappels aux non-répondants."
-        ),
-        "legacy": True,
-    },
-    "pick": {
-        "category": "calendar",
-        "summary": "Crée un sondage de dates avec des réactions — ancien système.",
-        "details": "Conservé temporairement comme solution de repli pendant l’évaluation de `/schedule`.",
-        "usage": "/pick role:<rôle> [days] [delay] [reminders]",
-        "parameters": (
-            "`role` — rôle des joueurs concernés.\n"
-            "`days` *(défaut : 7)* — nombre de jours proposés.\n"
-            "`delay` *(défaut : 0)* — délai avant le premier jour.\n"
-            "`reminders` *(défaut : oui)* — envoie des rappels aux non-répondants."
-        ),
-        "legacy": True,
     },
     "cleanup": {
         "category": "moderation",
@@ -162,25 +136,16 @@ class Utils(commands.Cog):
                 value="\n".join(entries),
                 inline=False,
             )
-        embed.set_footer(
-            text="Les éléments marqués « ancien système » sont conservés pour permettre un retour en arrière."
-        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @staticmethod
     def build_command_help(command):
         entry = HELP_ENTRIES[command]
         title = f"Aide — /{command}"
-        if entry.get("legacy"):
-            title += " · Ancien système"
         embed = discord.Embed(
             title=title,
             description=entry["details"],
-            color=(
-                discord.Color.orange()
-                if entry.get("legacy")
-                else discord.Color.blue()
-            ),
+            color=discord.Color.blue(),
         )
         embed.add_field(name="Utilisation", value=f"`{entry['usage']}`", inline=False)
         embed.add_field(name="Description", value=entry["summary"], inline=False)
